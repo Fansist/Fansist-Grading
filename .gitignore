@@ -19,6 +19,9 @@ env/
 # Streamlit
 .streamlit/secrets.toml
 
+# Local card/report store written by report.save_report / web_report.py
+cards/
+
 # OS / editor cruft
 .DS_Store
 .idea/

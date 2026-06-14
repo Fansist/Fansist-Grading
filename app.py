@@ -22,6 +22,8 @@ import cv2
 import numpy as np
 import streamlit as st
 
+import os
+
 from card_detector import CardDetectionError
 from pipeline import (
     annotate_condition,
@@ -30,6 +32,7 @@ from pipeline import (
     decode_image,
     run_pipeline,
 )
+from report import DEFAULT_BASE_URL, build_report, make_qr_png_bytes, save_report
 
 
 def _bgr_to_rgb(image: np.ndarray) -> np.ndarray:
@@ -106,6 +109,28 @@ def render_results(image_bgr: np.ndarray) -> None:
 
     with st.expander("Full grade object (JSON)"):
         st.json(grade.to_dict())
+
+    # --- Slab QR + shareable report -----------------------------------------
+    base_url = os.environ.get("FANSIST_BASE_URL", DEFAULT_BASE_URL)
+    report = build_report(result, base_url=base_url)
+    store = os.environ.get("FANSIST_STORE")
+    if store:  # persist so the web report page (web_report.py) can serve it
+        save_report(report, result, store)
+
+    st.subheader("Slab QR & report")
+    qr_col, info_col = st.columns([1, 3])
+    with qr_col:
+        st.image(make_qr_png_bytes(report.report_url), width=170)
+    with info_col:
+        st.write(f"**Cert:** `{report.cert_id}`")
+        st.write(f"**Overall:** {report.overall_grade:g}/10 "
+                 f"({report.overall_score_1000}/1000)")
+        st.write(f"**Report:** {report.report_url}")
+        st.caption(
+            "This QR is printed on the slab; scanning it opens the full report "
+            "page (run `web_report.py` to serve it). Set FANSIST_STORE to persist "
+            "each card and FANSIST_BASE_URL to your domain."
+        )
 
 
 def main() -> None:

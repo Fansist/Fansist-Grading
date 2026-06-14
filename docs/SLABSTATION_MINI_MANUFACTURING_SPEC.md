@@ -2,9 +2,19 @@
 
 **Product:** Tabletop trading-card **imaging + slabbing** device
 **Document type:** Manufacturing specification / Request for Quote (RFQ)
-**Revision:** B — **all design decisions locked** (was Rev A: choices open)
+**Revision:** C — adds the **automated** variant + **QR-linked report**
 **Date:** 2026-06-14
 **Prepared for:** Contract manufacturer / fabrication & assembly supplier
+
+> **Two SKUs (choose per quote):**
+> - **Mini Lite** — *manual* hinged-lever press, smartphone camera. **BOM ≈ $122**,
+>   meets the original < $200 target. Fully specified in §1–§18.
+> - **Mini Auto** — *fully automatic*: onboard camera + computer grade the card,
+>   then the machine feeds a slab shell, **places the card inside, prints &
+>   applies the QR label, and closes the slab automatically**. The QR opens a web
+>   page with the full TAG-style statistics. Automation + onboard camera + label
+>   printer raise the BOM to **≈ $265** (still desktop-sized). Specified in
+>   **§19–§22**, which supersede the manual press/camera sections for that SKU.
 
 > **What I'm asking you (the manufacturer) to do:** review this spec, give DFM
 > feedback, and quote (a) a first-article prototype and (b) batch pricing at 100 /
@@ -372,8 +382,117 @@ real measured dimensions (Rev B uses the 86 × 120 × 10 mm reference).
 
 ---
 
-*Companion software (card detection, deskew, and four-factor grading —
-centering/corners/edges/surface) is a separate product in this repository; the
-SlabStation Mini simply produces the consistent image it grades and the slab it
-ships in. A larger, fully-automated industrial line is documented separately in
+---
+
+# Part II — Mini **Auto** (fully automatic SKU)
+
+Sections §19–§22 add automation on top of the same enclosure and imaging bay.
+Where they conflict, they supersede §4.2 (camera) and §4.3 (manual press) for the
+Auto SKU. The card is loaded once; the machine does everything else.
+
+## 19. Automated operating sequence
+
+```
+ user drops card in input tray
+        │
+        ▼
+ [1] CARD PICK  — vacuum/friction picker lifts one card onto the imaging nest
+        ▼
+ [2] IMAGE      — onboard camera + cross-polarised LEDs capture front (and,
+                  optionally, a flip for back); fixed geometry, no phone
+        ▼
+ [3] GRADE      — onboard computer (Raspberry Pi) runs THIS repo's pipeline:
+                  detect → centering/corners/edges/surface → overall grade
+        ▼
+ [4] CERT+QR    — mint cert id, build the report, upload it to the web service,
+                  and PRINT the QR label (thermal label printer)
+        ▼
+ [5] SLAB FEED  — shell magazine drops one bottom shell into the assembly nest
+        ▼
+ [6] PLACE CARD — card-transfer arm moves the graded card into the bottom shell;
+                  vision-verifies it is centred (±0.3 mm)
+        ▼
+ [7] LABEL      — applicator places the printed QR label in the slab's label window
+        ▼
+ [8] CLOSE      — motorised press lowers the top shell and seats the magnets squarely
+        ▼
+ [9] EJECT      — finished, QR-labelled slab slides to the output chute
+```
+
+> **"Prints the slab" — design note.** A clear protective case cannot be cheaply
+> 3D-printed, so the Auto SKU uses **pre-made clear one-touch shells** from a
+> magazine and *prints the QR label* + assembles + seals automatically. (If
+> in-machine case fabrication is truly required, that is a resin-printer path with
+> very different cost/cycle-time — out of scope here; advise if wanted.)
+
+## 20. Automation subsystems
+
+| # | Subsystem | Implementation (low-cost, desktop) |
+|---|---|---|
+| A | **Onboard camera** | 12 MP autofocus camera module (Raspberry Pi Camera v3 or USB UVC), fixed over the aperture. Replaces the phone so capture is automatic. |
+| B | **Onboard computer** | **Raspberry Pi 5 (4 GB)** runs the grading pipeline, mints the cert, builds & uploads the report, drives the QR printer, and commands motion. |
+| C | **Card pick & transfer** | One small **NEMA-17 + lead-screw** Z axis with a **vacuum cup** (12 V mini pump) on a short swing arm: pick from tray → nest → into shell. |
+| D | **Slab-shell magazine + feeder** | Gravity stack of bottom shells; a **servo** escapement drops one into the assembly nest per cycle. Capacity ~20. |
+| E | **QR label printer** | Embedded **thermal label printer** module (e.g. 50 mm) prints the QR + cert; a small applicator/peeler places it in the label window. |
+| F | **Motorised press** | The manual `press_arm` is replaced by a **NEMA-17 + lead-screw** driving `press_platen` down a 2-rail guide; limit switch + current sense set the close. |
+| G | **Sensors** | Card-present (reflective), shell-present, platen home/limit switches, output-bin full. |
+| H | **Motion control** | Pi + a **stepper HAT / 2× TMC2209** + 2× servo channel; 12 V supply for motors, 5 V for the Pi/camera. |
+
+The enclosure, imaging bay, diffusers, cross-polariser, background and
+`slab_nest` from Part I are reused unchanged; the Auto SKU adds the modules above
+in the lower bay and swaps the press head.
+
+## 21. Automated BOM (delta over Mini Lite)
+
+Add these to (and remove the manual press hardware from) the §5 BOM:
+
+| Item | Qty | Spec | Proto $ | @500 $ |
+|---|---|---|--:|--:|
+| Raspberry Pi 5 (4 GB) + microSD | 1 | onboard compute | 65 | 55 |
+| Camera module (autofocus 12 MP) | 1 | Pi Cam v3 / USB UVC | 28 | 18 |
+| Thermal QR-label printer module | 1 | embedded, ~50 mm | 40 | 26 |
+| Steppers + drivers | 2 | NEMA-17 + TMC2209 | 26 | 16 |
+| Servos (feeder, label, picker) | 3 | metal-gear micro | 15 | 8 |
+| Lead-screws, rails, bushings | 1 set | 2× Z guide + press | 22 | 12 |
+| Vacuum pick (mini pump + cup) | 1 | 12 V | 12 | 7 |
+| Sensors + limit switches | 1 set | reflective + micro | 8 | 4 |
+| 12 V/5 V PSU + wiring + control PCB | 1 | certified brick + harness | 20 | 12 |
+| Shell magazine + applicator prints | 1 set | FDM → injection | 12 | 5 |
+| **Automation add subtotal** | | | **≈ 248** | **≈ 163** |
+| *less* manual press hardware (§5 #7) | | | −6 | −2 |
+| **Mini Auto BOM TOTAL** | | | **≈ $265** | **≈ $165** |
+
+**Honest cost note:** automation + an onboard camera + a label printer push the
+Auto SKU to **≈ $265 BOM** (vs. $122 manual) — above the original $200 target,
+because reliable hands-free operation simply needs motors, sensors, compute and a
+printer. It is still desktop-sized and, at ~$165 BOM in volume, supports a retail
+price comfortably under the value of what it replaces. The **Mini Lite** manual
+SKU remains the < $200 option. *To approach $200 on the Auto SKU:* drop to a Pi
+Zero 2 W (−$40, slower grading), pre-print QR labels instead of an onboard printer
+(−$40, loses per-card printing), or share one stepper via a cam.
+
+## 22. QR code + TAG-style report (software, implemented in this repo)
+
+The QR printed on every slab encodes `https://<your-domain>/card/<cert_id>` and
+opens the full report. This is **already built and tested** in the repository:
+
+- **`report.py`** — runs the pipeline, mints a cert id (`FAN-XXXXXXXXXX`), and
+  produces a TAG-style record: overall grade on **1–10 and 1–1000** scales, the
+  four sub-grades, a **per-corner (×4) and per-edge (×4)** 1–10 breakdown, the
+  centering measurements (ratios + pixel margins), and surface defect density;
+  generates the **QR PNG**; and persists report JSON + annotated images per cert.
+- **`web_report.py`** — a Flask page at `/card/<cert_id>` that renders all of the
+  above (styled report with the annotated imagery and the QR).
+
+On the Auto SKU the Raspberry Pi runs `report.grade_image_to_report(...)`, uploads
+the cert folder to the hosted `web_report` service, and sends the QR to the label
+printer — so scanning the finished slab opens the live stats page. Population /
+card-metadata fields are present in the record for future registry features.
+
+---
+
+*Companion grading software (card detection, deskew, and four-factor grading —
+centering/corners/edges/surface, plus the QR report) lives in this repository; the
+SlabStation Mini produces the consistent image it grades and the slab it ships in.
+A larger, fully-automated industrial line is documented separately in
 `docs/HARDWARE_BLUEPRINT.md`.*

@@ -95,6 +95,26 @@ print(result.grade.to_dict())          # all four sub-grades + overall
 turns that into an error JSON and a non-zero exit code, and `--out-prefix` saves
 `_original`, `_rectified`, and `_condition` annotated PNGs.
 
+### Slab QR code + report web page
+
+Every graded card can mint a **certificate** with a **QR code** (printed on the
+slab) that opens a web page showing the full **TAG-style statistics** — overall
+grade on 1–10 and 1–1000 scales, the four sub-grades, a per-corner (×4) and
+per-edge (×4) breakdown, centering measurements, surface defect density, and the
+annotated images.
+
+```bash
+# Grade an image -> mint a cert, write report JSON + QR + images into ./cards/
+python report.py path/to/card.jpg --store ./cards --base-url https://grade.example
+
+# Serve the report page (scanning the slab's QR opens /card/<cert_id>)
+FANSIST_STORE=./cards python web_report.py        # http://localhost:8000
+```
+
+`report.py` builds the stats record + QR; `web_report.py` is a small Flask app
+serving `/card/<cert_id>`. The Streamlit app also shows the QR + report link
+(set `FANSIST_STORE` to persist and `FANSIST_BASE_URL` to your domain).
+
 ### Testing
 
 ```bash
@@ -178,7 +198,9 @@ surface.py             High-pass defect detection -> surface defect score.
 condition_utils.py     Shared border-reference / anomaly helpers for corners+edges.
 grading.py             Map each factor to a sub-grade; combine into overall; CardGrade.
 pipeline.py            Headless detect -> 4 factors -> grade + decode + annotate + CLI.
-app.py                 Streamlit UI (thin layer over pipeline.py).
+report.py              Cert id + QR + TAG-style stats record; persistence + CLI.
+web_report.py          Flask page (/card/<cert_id>) the slab QR opens.
+app.py                 Streamlit UI (thin layer over pipeline.py) incl. the QR.
 tests/                 pytest suite + synthetic-card fixtures.
 requirements.txt       Runtime deps (OpenCV, NumPy, Streamlit).
 requirements-dev.txt   Test deps (adds pytest).
@@ -230,11 +252,13 @@ the overall — so swapping or improving any one factor never touches the others
 Two hardware designs that photograph cards under controlled lighting and
 encapsulate them in slabs — the physical front-end/back-end for this software:
 
-- **[SlabStation Mini](docs/SLABSTATION_MINI_MANUFACTURING_SPEC.md)** — a
-  **tabletop, ~$122-BOM, < $500-retail** semi-automatic device (controlled-light
-  imaging bay + manual hinged-lever slab press). This is a **manufacturer-ready**
-  package with every decision locked: spec/RFQ + real **laser-cut DXF panels**,
-  **watertight STL parts**, and parametric generators in [`hardware/`](hardware/).
+- **[SlabStation Mini](docs/SLABSTATION_MINI_MANUFACTURING_SPEC.md)** — a tabletop,
+  **manufacturer-ready** device in two SKUs: **Lite** (manual hinged-lever press,
+  phone camera, **~$122 BOM**) and **Auto** (onboard camera + computer grade the
+  card, then it auto-feeds a shell, **places the card, prints & applies the QR
+  label, and closes the slab**, **~$265 BOM**). Package includes the spec/RFQ,
+  real **laser-cut DXF panels**, **watertight STL parts**, and parametric
+  generators in [`hardware/`](hardware/).
 - **[Industrial blueprint](docs/HARDWARE_BLUEPRINT.md)** — a fully-automated
   production line (rotary dial, machine-vision imaging, ultrasonic-welded slabs)
   for high throughput. It supplies the multi-angle captures that make the surface

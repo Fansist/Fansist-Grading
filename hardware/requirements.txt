@@ -1,4 +1,7 @@
-# Dependencies for regenerating the SlabStation Mini laser-cut DXF panels.
-# Not needed to run the grading app -- only for hardware/generate_panels.py.
-ezdxf>=1.4
-matplotlib>=3.8   # only for the preview PNG render
+# Dependencies for regenerating the SlabStation Mini CAD files.
+# Not needed to run the grading app -- only for the hardware generators.
+ezdxf>=1.4          # laser-cut DXF panels  (generate_panels.py)
+trimesh>=4.0        # 3D-printed STL parts  (generate_parts.py)
+manifold3d>=2.0     # robust boolean engine used by trimesh
+numpy>=1.24
+matplotlib>=3.8     # preview PNG renders only

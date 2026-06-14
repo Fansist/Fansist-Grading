@@ -1,17 +1,17 @@
-# Fansist SlabStation Mini — Manufacturing Specification & RFQ (Rev A)
+# Fansist SlabStation Mini — Manufacturing Specification & RFQ (Rev B)
 
 **Product:** Tabletop trading-card **imaging + slabbing** device
 **Document type:** Manufacturing specification / Request for Quote (RFQ)
-**Revision:** A (for quoting and first-article prototyping)
+**Revision:** B — **all design decisions locked** (was Rev A: choices open)
 **Date:** 2026-06-14
 **Prepared for:** Contract manufacturer / fabrication & assembly supplier
 
 > **What I'm asking you (the manufacturer) to do:** review this spec, give DFM
 > feedback, and quote (a) a first-article prototype and (b) batch pricing at 100 /
-> 500 / 1000 units. CAD deliverables (DXF for laser parts, STEP/STL for moulded/
-> printed parts) are listed in §16; **Rev A laser-cut DXF panel files are already
-> provided** (see `/hardware/dxf/`). Open questions to confirm before tooling are
-> in §18.
+> 500 / 1000 units. **Every configuration choice is locked — see §18.** CAD is
+> already provided: **laser-cut DXF panels** in `/hardware/dxf/` and **STL solids
+> for every printed part** in `/hardware/stl/` (§16). Geometry is Rev B, for
+> quoting and a first physical prototype; validate fit before production tooling.
 
 ---
 
@@ -105,31 +105,34 @@ manual steps.
   mounted on the two side walls behind diffuser panels for even, diffuse light.
 - **Diffusers:** 2× 3 mm frosted acrylic panels (60 × 280 mm) in front of the LEDs.
 - **Cross-polarisation (glare control):** linear polariser film over the LED
-  diffusers + a **clip-on linear polariser** on the camera/phone lens, crossed
-  ~90°. This is the single most important image-quality feature for foil/holo
-  cards.
+  diffusers + a **clip-on linear polariser** on the phone lens, crossed ~90°.
+  This is the single most important image-quality feature for foil/holo cards.
 - **Background:** interchangeable matte neutral insert (mid-grey default; black &
   white spares) seated under the card nest.
-- **Camera (baseline):** the **user's smartphone**, located by a printed cradle on
-  the top panel over the aperture (free, highest image quality).
-- **Camera (optional integrated):** a 12–16 MP USB camera **or** Raspberry Pi Zero
-  2 W + camera module, fixed-focus at the calibrated working distance. Adds cost
-  & electronics — quote as a variant (§18).
+- **Camera — LOCKED: smartphone only.** The user's phone lies screen-up in a
+  printed **`phone_cradle`** (STL provided) that clips over the top aperture; the
+  rear camera looks straight down through the cradle's Ø40 hole + the Ø75 panel
+  aperture. Chosen because it is free, the highest image quality available, and
+  adds no electronics or electrical-compliance burden. (An integrated camera is a
+  possible *future* SKU, deliberately out of this build.)
 
-### 4.3 Slab press module
-- **Compatibility (baseline):** common **"one-touch" magnetic** two-piece acrylic
-  card holders (e.g. 35 pt / standard card). The device **does not** manufacture
-  holders — they are a consumable accessory; ship 3 starter holders.
-- **Mechanism:** a **Class-1 lever** (hand-pulled) drives a flat **press platen**
-  straight down onto a **slab nest** that registers the bottom shell + inner frame
-  + card + top shell, closing the two halves **squarely** so the magnets seat and
-  the acrylic isn't cracked. Linear guidance via 2 printed posts (or 2× Ø6 mm
-  steel rod + bushings for the premium build). Return spring lifts the platen.
-- **Alternative (screw-down holders):** swap the press platen for an **alignment
-  template** that guides 4 corner screws; user drives them with the included hex
-  driver. Reusable, tamper-resistant. Selectable per market (§18).
-- **Critical function:** even, square closing force; the nest must hold the card
-  central in the inner frame within **± 0.3 mm** so the slabbed card looks centred.
+### 4.3 Slab press module — LOCKED: manual hinged lever, one-touch holder
+- **Slab — LOCKED:** common **"one-touch" magnetic** two-piece acrylic holder,
+  **reference outer 86 × 120 × 10 mm** (standard 35 pt card). The device does not
+  manufacture holders — they are a cheap consumable accessory; ship 3 starters.
+  (Screw-down holders are *not* supported in this build — one mechanism keeps cost
+  and part count down.)
+- **Mechanism — LOCKED: hinged lever press** (STL parts provided). The user drops
+  the open holder (bottom shell + card + top shell resting) into the **`slab_nest`**,
+  which registers it on the **`press_base`**; swings the hinged **`press_arm`**
+  down; and presses the handle. The **`press_platen`** (with a glued EVA foam pad)
+  contacts the top shell and closes the two halves **squarely** so the magnets seat
+  without cracking the acrylic. Hinge = one Ø5 steel pin; gravity/hand return.
+  Chosen over linear-rail/screw presses: fewest parts, self-aligning, no precision
+  bearings, fully 3D-printable, reliable at the low force a magnetic holder needs.
+- **Critical function:** even, square closing; the nest holds the card central in
+  the holder within **± 0.3 mm** so the slabbed card looks centred. The platen is a
+  separate, swappable plate so a future holder size is a one-part change.
 
 ---
 
@@ -142,24 +145,23 @@ build; the integrated camera is an **optional** add.
 | # | Item | Qty | Material / spec | Process | Proto $ | @500 $ |
 |---|---|---|---|---|--:|--:|
 | 1 | Enclosure panels (7) | 1 set | 5 mm MDF (or acrylic) | Laser cut | 30 | 8 |
-| 2 | Printed parts set | 1 set | PLA/PETG → ABS at volume (brackets, phone cradle, slab nest, press platen, lever, registration stops) | FDM → injection | 20 | 6 |
+| 2 | Printed parts set | 1 set | PLA/PETG → ABS at volume — `corner_bracket`×8, `phone_cradle`, `slab_nest`, `press_base`, `press_arm`, `press_platen`, `reg_stop`×2 (STL provided) | FDM → injection | 22 | 7 |
 | 3 | LED strip, hi-CRI 5000 K | 0.5 m | 5 V, ≥90 CRI + connectors | COTS | 8 | 3 |
 | 4 | Diffuser panels (2) | 2 | 3 mm frosted acrylic | Laser cut | 6 | 2 |
 | 5 | Polariser film + clip-on lens polariser | 1 | Linear polariser (A5 sheet + clip) | COTS/cut | 11 | 4 |
 | 6 | 5 V USB power kit | 1 | **Certified** 5 V/2 A adapter + cable + inline switch | COTS | 9 | 4 |
-| 7 | Press hardware | 1 set | Pivot bolt, return spring, guide posts/rod, bushings | COTS | 14 | 5 |
-| 8 | Fasteners & inserts | 1 set | M3/M4 screws, nuts, heat-set inserts, magnets | COTS | 8 | 3 |
+| 7 | Press hardware | 1 set | Ø5×80 hinge pin (bolt) + locknut; EVA foam platen pad | COTS | 6 | 2 |
+| 8 | Fasteners & inserts | 1 set | M3 screws, nuts, heat-set inserts | COTS | 8 | 3 |
 | 9 | Feet / adhesive / cable mgmt | 1 set | Rubber feet, VHB, ties | COTS | 6 | 2 |
 | 10 | Background inserts (3) | 1 set | Matte board, grey/black/white | Die-cut | 4 | 1.5 |
 | 11 | Starter slab holders | 3 | One-touch magnetic, 35 pt | COTS accessory | 5 | 2.5 |
 | 12 | Packaging + printed manual | 1 | Box, foam/insert, QSG | COTS/print | 7 | 3 |
-| | **Baseline BOM total** | | | | **≈ 128** | **≈ 44** |
-| 13 | *Optional* integrated camera | 1 | USB cam or Pi Zero 2 W + cam | COTS | +35–55 | +18–30 |
-| | **With integrated camera** | | | | **≈ 163–183** | **≈ 62–74** |
+| | **BOM TOTAL (as built)** | | | | **≈ 122** | **≈ 42** |
 
-**Both configurations meet the < $200 BOM target.** At 500 units the baseline BOM
-(~$44) supports a sub-$500 retail price with very healthy margin (and could retail
-far lower if positioned aggressively).
+**Comfortably under the < $200 BOM target (~$122 at prototype qty).** At 500 units
+the BOM (~$42) supports the < $500 retail price with very healthy margin — and the
+product could retail far lower if positioned aggressively. *(An integrated-camera
+SKU would add ≈ $35–55 and remain < $200, but is intentionally out of this build.)*
 
 ---
 
@@ -174,19 +176,25 @@ far lower if positioned aggressively).
   - Press platen travel square to the nest: **≤ 0.5°** tilt at full stroke.
   - Camera working distance fixed/repeatable so a card fills the frame
     consistently (±2 mm).
-- **Provided now:** Rev A **laser-cut DXF** for all flat panels (R2010, mm, layers
-  `CUT`/`ENGRAVE`). See `/hardware/dxf/` and the preview in `/hardware/preview/`.
-- **To be produced for tooling:** STEP (assembly + moulded parts) and STL (printed
-  parts). Geometry is fully defined by this spec + DXF; we can deliver native CAD
-  on award, or the supplier may model from these for a fee — please quote.
+- **Provided now:** **laser-cut DXF** for every flat panel (R2010, mm, layers
+  `CUT`/`ENGRAVE`) in `/hardware/dxf/`, and **watertight STL solids for every
+  printed part** in `/hardware/stl/`. Previews in `/hardware/preview/`.
+- **To be produced for tooling (quote please):** a STEP assembly and dimensioned
+  GA/detail drawings carrying the §6 tolerances. Geometry is fully defined by the
+  DXF + STL + this spec.
 
 ---
 
 ## 7. Materials & finishes
 
+**Material — LOCKED:** structural panels are **5 mm MDF, sealed matte black**
+(cheapest, robust, and a matte-black interior is exactly what the imaging bay
+needs — no reflections). Cast acrylic is an optional premium finish, not the
+default.
+
 | Part | Material | Finish |
 |---|---|---|
-| Structural panels | 5 mm MDF **or** cast/extruded acrylic | Interior **matte black** (mandatory); exterior per brand |
+| Structural panels | **5 mm MDF** (acrylic = premium option) | Interior **matte black** (mandatory); exterior matte black |
 | Printed/moulded parts | PLA/PETG (proto) → ABS/PC (production) | Matte black |
 | Diffusers | 3 mm frosted/opal acrylic | As supplied |
 | Background inserts | Matte board / PVC | Non-glossy, neutral |
@@ -225,8 +233,10 @@ before sale; this list is a starting point, not certification.*
    switch; apply polariser film over diffusers.
 5. Attach **front** (access window) and **top** (aperture) panels; clip on the
    phone cradle.
-6. Assemble the **slab press**: posts/rod + bushings → platen → lever + pivot
-   bolt + return spring → slab nest.
+6. Assemble the **slab press**: bolt `press_base` to the enclosure floor → glue
+   the EVA pad into `press_platen` and screw the platen to `press_arm` (40 mm
+   centres) → hinge `press_arm` to the base with the Ø5 pin + locknut → drop
+   `slab_nest` into the base recess.
 7. Insert background, fit feet, attach labels, functional test (§11), pack (§10).
 
 ---
@@ -306,43 +316,59 @@ across ≥500 units it still lands the BOM well under target.
 
 ## 16. File manifest (provided / to-produce)
 
-**Provided now (Rev A, in this repository under `/hardware/`):**
+**Laser-cut (5 mm MDF unless noted) — DXF R2010, mm:**
 - `hardware/dxf/bottom.dxf`, `top.dxf`, `back.dxf`, `side_left.dxf`,
-  `side_right.dxf`, `front.dxf`, `nest_shelf.dxf` — 5 mm structural panels.
+  `side_right.dxf`, `front.dxf`, `nest_shelf.dxf` — structural panels.
 - `hardware/dxf/diffuser_3mm.dxf` — 3 mm frosted acrylic (×2).
 - `hardware/dxf/background_insert.dxf` — board reference.
 - `hardware/dxf/nest_sheet_5mm.dxf` — all 5 mm panels nested on one sheet.
-- `hardware/preview/nest_sheet.png` — visual reference render.
-- `hardware/generate_panels.py` — parametric generator (edit dimensions & re-run).
 
-**To produce on award (or by supplier, quoted):** STEP assembly; STL for printed
-parts (brackets, phone cradle, slab nest, press platen, lever, registration
-stops); GA & detail drawings with the §6 tolerances; wiring diagram.
+**3D-printed parts — STL solids (watertight, mm):**
+- `hardware/stl/press_base.stl`, `press_arm.stl`, `press_platen.stl` — hinged press.
+- `hardware/stl/slab_nest.stl` — registers the one-touch holder.
+- `hardware/stl/phone_cradle.stl` — phone holder over the aperture.
+- `hardware/stl/corner_bracket.stl` (×8) — enclosure joinery.
+- `hardware/stl/reg_stop.stl` (×2) — imaging-nest card registration.
+
+**Generators & previews (re-run to change any dimension):**
+- `hardware/generate_panels.py` → DXF; `hardware/generate_parts.py` → STL.
+- `hardware/preview/nest_sheet.png`, `hardware/preview/parts_exploded.png`.
+
+**To produce on award (quoted):** a STEP assembly and GA/detail drawings with the
+§6 tolerances, plus the LED wiring diagram. All geometry is fully defined by the
+DXF + STL + this spec.
 
 ---
 
 ## 17. Revision history
-- **Rev A (2026-06-14):** initial release for quoting & first-article prototyping.
-  Laser-cut panel geometry defined; printed/moulded parts specified dimensionally
-  (CAD to follow). **Not yet validated by a physical prototype** — expect changes
-  after first article.
+- **Rev A (2026-06-14):** initial release; configuration choices left open.
+- **Rev B (2026-06-14):** **all decisions locked** (§18); hinged-lever press
+  designed; **STL solids provided for every printed part**; BOM finalised (~$122).
+  **Not yet validated by a physical prototype** — expect minor changes after first
+  article (fit of joints, holder pocket, platen travel).
 
 ---
 
-## 18. Open questions to confirm before tooling (please advise)
+## 18. Locked design decisions (Rev B)
 
-1. **Camera:** ship **smartphone-only** (baseline, cheapest, best image) or offer
-   an **integrated camera** variant? (Affects BOM, electronics, compliance.)
-2. **Slab style:** standardise on **one-touch magnetic** (press) or **screw-down**
-   (driver template), or support both as press-head swaps?
-3. **Joinery:** keep **bracket+screw** (Rev A) or move to **finger-joint** panels
-   for fewer parts / faster assembly?
-4. **Material/finish:** **MDF** (cheapest) vs **acrylic** (premium) as the default
-   retail finish?
-5. **Slab dimensions:** confirm the exact **make/model of holder** to standardise
-   on, so the slab nest and press platen are dimensioned to it (Rev A assumes a
-   generic 35 pt one-touch ≈ 91 × 130 mm outer).
-6. **Ship flat-pack or pre-assembled?**
+Every previously-open choice is now decided; build to these:
+
+1. **Camera — smartphone only.** Printed `phone_cradle` over the aperture. No
+   integrated camera in this build (free, best image, no electronics/compliance).
+2. **Slab — one-touch magnetic only**, reference outer **86 × 120 × 10 mm**. No
+   screw-down variant (single mechanism = lowest cost/part count).
+3. **Press — manual hinged lever** (`press_base` + `press_arm` + `press_platen` +
+   `slab_nest`, one Ø5 hinge pin). No linear rails, springs, or motors.
+4. **Joinery — printed corner brackets + M3** (`corner_bracket` ×8). Panels carry
+   the matching holes; no finger joints.
+5. **Material — 5 mm MDF, matte black** (interior mandatory matte to kill
+   reflections). Acrylic is an optional premium finish only.
+6. **Ship pre-assembled** retail (factory assembles the flat-pack); fold-flat is a
+   cost option if the buyer prefers.
+
+*One thing to confirm against your supply chain:* the **exact one-touch holder SKU**
+you'll bundle, so we final-tune the `slab_nest` pocket and `press_platen` to its
+real measured dimensions (Rev B uses the 86 × 120 × 10 mm reference).
 
 ---
 

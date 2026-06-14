@@ -231,10 +231,10 @@ Two hardware designs that photograph cards under controlled lighting and
 encapsulate them in slabs — the physical front-end/back-end for this software:
 
 - **[SlabStation Mini](docs/SLABSTATION_MINI_MANUFACTURING_SPEC.md)** — a
-  **tabletop, < $200-BOM, < $500-retail** semi-automatic device (controlled-light
-  imaging bay + manual slab press). This is a **manufacturer-ready** package:
-  spec/RFQ + real **laser-cut DXF panels** and a parametric generator in
-  [`hardware/`](hardware/).
+  **tabletop, ~$122-BOM, < $500-retail** semi-automatic device (controlled-light
+  imaging bay + manual hinged-lever slab press). This is a **manufacturer-ready**
+  package with every decision locked: spec/RFQ + real **laser-cut DXF panels**,
+  **watertight STL parts**, and parametric generators in [`hardware/`](hardware/).
 - **[Industrial blueprint](docs/HARDWARE_BLUEPRINT.md)** — a fully-automated
   production line (rotary dial, machine-vision imaging, ultrasonic-welded slabs)
   for high throughput. It supplies the multi-angle captures that make the surface

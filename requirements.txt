@@ -1,0 +1,5 @@
+# Trading Card Centering Grader (v1) -- minimal, no ML frameworks.
+# Pinned to lower bounds known to provide the APIs used here.
+streamlit>=1.32
+opencv-python-headless>=4.8
+numpy>=1.24

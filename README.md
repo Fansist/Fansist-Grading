@@ -143,6 +143,15 @@ will automatically fold it into the overall grade. Adjust the combination rule
 in `compute_overall()` (average vs. lowest-sub-grade-wins vs. weighted) to match
 your target grading standard.
 
+### Hardware: automated imaging + slabbing machine
+
+A full engineering blueprint for a machine that photographs cards under
+controlled lighting and encapsulates them into sealed slabs — the hardware
+front-end/back-end for this software — lives in
+[`docs/HARDWARE_BLUEPRINT.md`](docs/HARDWARE_BLUEPRINT.md). It is designed to
+call this repo's pipeline as a library and to light up the corner/edge/surface
+modules above via multi-angle captures, with no change to the core schema.
+
 ---
 
 ## Limitations (v1)

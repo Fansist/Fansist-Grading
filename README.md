@@ -225,14 +225,22 @@ Each grader is an independent module returning a `[0,1]` wear score that
 `grading.build_full_grade` maps to a sub-grade, and `compute_overall` folds into
 the overall — so swapping or improving any one factor never touches the others.
 
-### Hardware: automated imaging + slabbing machine
+### Hardware: imaging + slabbing machines
 
-A full engineering blueprint for a machine that photographs cards under
-controlled lighting and encapsulates them into sealed slabs — the hardware
-front-end/back-end for this software — lives in
-[`docs/HARDWARE_BLUEPRINT.md`](docs/HARDWARE_BLUEPRINT.md). It calls this repo's
-pipeline as a library and supplies the multi-angle captures that make the
-surface (and corner/edge) grading materially better.
+Two hardware designs that photograph cards under controlled lighting and
+encapsulate them in slabs — the physical front-end/back-end for this software:
+
+- **[SlabStation Mini](docs/SLABSTATION_MINI_MANUFACTURING_SPEC.md)** — a
+  **tabletop, < $200-BOM, < $500-retail** semi-automatic device (controlled-light
+  imaging bay + manual slab press). This is a **manufacturer-ready** package:
+  spec/RFQ + real **laser-cut DXF panels** and a parametric generator in
+  [`hardware/`](hardware/).
+- **[Industrial blueprint](docs/HARDWARE_BLUEPRINT.md)** — a fully-automated
+  production line (rotary dial, machine-vision imaging, ultrasonic-welded slabs)
+  for high throughput. It supplies the multi-angle captures that make the surface
+  (and corner/edge) grading materially better.
+
+Both call this repo's pipeline as a library.
 
 ---
 

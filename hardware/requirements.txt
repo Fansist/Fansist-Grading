@@ -1,0 +1,4 @@
+# Dependencies for regenerating the SlabStation Mini laser-cut DXF panels.
+# Not needed to run the grading app -- only for hardware/generate_panels.py.
+ezdxf>=1.4
+matplotlib>=3.8   # only for the preview PNG render

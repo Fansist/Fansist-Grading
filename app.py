@@ -42,8 +42,10 @@ def _bgr_to_rgb(image: np.ndarray) -> np.ndarray:
 
 def render_results(image_bgr: np.ndarray) -> None:
     """Run the pipeline on the uploaded image and render all outputs."""
+    from calibration import load_optional
+    calibration = load_optional(os.environ.get("FANSIST_CALIBRATION"))
     try:
-        result = run_pipeline(image_bgr)
+        result = run_pipeline(image_bgr, calibration=calibration)
     except CardDetectionError as exc:
         st.error(
             "Could not detect the card.\n\n"
@@ -63,6 +65,9 @@ def render_results(image_bgr: np.ndarray) -> None:
     # --- Overall grade headline ---------------------------------------------
     if grade.overall is not None:
         st.subheader(f"Overall grade: {grade.overall:g}")
+    if calibration is not None:
+        st.caption("⚙️ Calibrated to your graded-card dataset "
+                   "(FANSIST_CALIBRATION).")
 
     g1, g2, g3, g4 = st.columns(4)
     g1.metric("Centering", f"{grade.centering_grade:g}", grade.centering_label)

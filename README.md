@@ -6,11 +6,14 @@ corners, edges, and surface** — combined into an overall grade. It locates the
 card, flattens it with a perspective transform, then measures each factor on the
 rectified image.
 
-**Classic computer vision, no ML.** No machine learning, no hardware, no live
-camera, no batch processing — just OpenCV + NumPy with tunable constants, so the
-whole thing is transparent and runnable anywhere. The four graders are
-independent, easy-to-tune modules; see [Accuracy & honesty](#accuracy--honesty)
-for what each factor can and can't see from a single flat photo.
+**Classic computer vision, no heavy ML.** No deep-learning framework, no hardware,
+no live camera, no batch processing — just OpenCV + NumPy with tunable constants,
+so the whole thing is transparent and runnable anywhere. The four graders are
+independent, easy-to-tune modules, and the grade mapping can be **trained on
+cards you've already had graded** so it matches a real standard (see
+[Training / calibrating](#training--calibrating-on-graded-cards-make-it-accurate)).
+See [Accuracy & honesty](#accuracy--honesty) for what each factor can and can't
+see from a single flat photo.
 
 ---
 
@@ -115,6 +118,43 @@ FANSIST_STORE=./cards python web_report.py        # http://localhost:8000
 serving `/card/<cert_id>`. The Streamlit app also shows the QR + report link
 (set `FANSIST_STORE` to persist and `FANSIST_BASE_URL` to your domain).
 
+### Training / calibrating on graded cards (make it accurate)
+
+By default the grader uses hand-tuned threshold tables. You can **train it on
+cards you've already had graded** (TAG/PSA/BGS) so it matches a real standard —
+no ML framework required (pure NumPy: isotonic regression + a learned overall
+rule).
+
+1. Put your graded card photos in a folder and list their known grades in a CSV
+   (`image` + any of `overall, centering, corners, edges, surface`, 1–10; blanks
+   allowed) — see [`data/labels.example.csv`](data/labels.example.csv).
+2. Train — it extracts each card's features, fits a monotonic feature→grade curve
+   per factor, learns the overall-combination rule (weighted / **lowest** /
+   average — e.g. PSA-style "worst sub-grade wins"), and reports the accuracy gain:
+
+   ```bash
+   python train.py --manifest data/labels.csv --images-root ./graded --out calibration.json
+   ```
+   ```
+   factor        n  MAE before  MAE after
+   corners      12       0.667      0.333
+   edges        12        0.75        0.0
+   surface      12       0.583        0.0
+   overall      12         2.0      0.333     # learned the "lowest" rule
+   ```
+3. Apply it everywhere by setting an env var (CLI, report, Streamlit, and the
+   automated machine all honour it):
+
+   ```bash
+   FANSIST_CALIBRATION=calibration.json python report.py card.jpg --store ./cards
+   ```
+
+Calibration only *replaces* the static scales for factors it has enough labels
+for, and it's guarded to never do worse than the defaults on your training set.
+More labelled cards → better accuracy; validate on a held-out set. The same
+feature interface (`pipeline.extract_features`) is where a heavier ML model
+(e.g. a CNN over the card crop) would later plug in.
+
 ### Testing
 
 ```bash
@@ -197,10 +237,13 @@ edges.py               Per-edge whitening/chipping -> edge wear score.
 surface.py             High-pass defect detection -> surface defect score.
 condition_utils.py     Shared border-reference / anomaly helpers for corners+edges.
 grading.py             Map each factor to a sub-grade; combine into overall; CardGrade.
+calibration.py         Learn the grade mapping from graded cards (isotonic fit).
+train.py               CLI: train a calibration from a CSV of graded cards.
 pipeline.py            Headless detect -> 4 factors -> grade + decode + annotate + CLI.
 report.py              Cert id + QR + TAG-style stats record; persistence + CLI.
 web_report.py          Flask page (/card/<cert_id>) the slab QR opens.
 app.py                 Streamlit UI (thin layer over pipeline.py) incl. the QR.
+data/                  labels.example.csv (training manifest format).
 tests/                 pytest suite + synthetic-card fixtures.
 requirements.txt       Runtime deps (OpenCV, NumPy, Streamlit).
 requirements-dev.txt   Test deps (adds pytest).

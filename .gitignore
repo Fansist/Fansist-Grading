@@ -21,6 +21,8 @@ env/
 
 # Local card/report store written by report.save_report / web_report.py
 cards/
+# Trained calibration output (user artifact)
+calibration.json
 
 # OS / editor cruft
 .DS_Store

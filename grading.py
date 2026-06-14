@@ -171,14 +171,25 @@ def grade_centering(
     return _WORST_GRADE
 
 
+def grade_from_metric(
+    value: float, scale: list[tuple[float, float, str]]
+) -> tuple[float, str]:
+    """Map a raw metric to (grade_value, label) via a "first row that fits" table.
+
+    Works for any scale where smaller-is-better (wear/defect in [0,1], or the
+    centering "worse %"): returns the first row whose threshold ``value`` meets.
+    """
+    for threshold, grade_value, label in scale:
+        if value <= threshold:
+            return grade_value, label
+    return _WORST_GRADE
+
+
 def _grade_from_wear(
     wear: float, scale: list[tuple[float, float, str]]
 ) -> tuple[float, str]:
     """Map a [0, 1] wear/defect score to (grade_value, label) via a scale table."""
-    for max_wear, grade_value, label in scale:
-        if wear <= max_wear:
-            return grade_value, label
-    return _WORST_GRADE
+    return grade_from_metric(wear, scale)
 
 
 def grade_corners(wear: float) -> tuple[float, str]:
@@ -201,9 +212,20 @@ def _round_half(value: float) -> float:
     return round(value * 2.0) / 2.0
 
 
+def label_for_grade(value: float, scale: list[tuple[float, float, str]]) -> str:
+    """Label of the scale tier whose grade is nearest ``value``.
+
+    Used when a *calibrated* (data-fit) grade replaces the static scale lookup,
+    so the human-readable label still comes from the same tier names.
+    """
+    best = min(scale, key=lambda row: abs(row[1] - value))
+    return best[2]
+
+
 def compute_overall(
     sub_scores: dict[str, Optional[float]],
     strategy: Optional[str] = None,
+    weights: Optional[dict[str, float]] = None,
 ) -> Optional[float]:
     """Combine the present sub-scores into an overall grade.
 
@@ -211,9 +233,11 @@ def compute_overall(
     whether one factor or all four are graded (a card with only centering simply
     returns the centering grade). The ``strategy`` (default ``OVERALL_STRATEGY``)
     selects how present sub-scores combine: ``"weighted"`` / ``"lowest"`` /
-    ``"average"``. Result is rounded to the nearest 0.5.
+    ``"average"``. ``weights`` overrides ``OVERALL_WEIGHTS`` for the weighted
+    strategy (e.g. weights learned by calibration). Rounded to the nearest 0.5.
     """
     strategy = strategy or OVERALL_STRATEGY
+    weights = weights or OVERALL_WEIGHTS
     present = {name: score for name, score in sub_scores.items() if score is not None}
     if not present:
         return None
@@ -224,12 +248,12 @@ def compute_overall(
     elif strategy == "average":
         raw = sum(values) / len(values)
     elif strategy == "weighted":
-        weights = {name: OVERALL_WEIGHTS.get(name, 0.0) for name in present}
-        total_w = sum(weights.values())
+        w = {name: weights.get(name, 0.0) for name in present}
+        total_w = sum(w.values())
         if total_w <= 0:  # no configured weights -> fall back to a plain mean
             raw = sum(values) / len(values)
         else:
-            raw = sum(present[name] * weights[name] for name in present) / total_w
+            raw = sum(present[name] * w[name] for name in present) / total_w
     else:
         raise ValueError(
             f"Unknown overall strategy {strategy!r}; expected "
@@ -245,13 +269,25 @@ def build_full_grade(
     edge_wear: Optional[float] = None,
     surface_wear: Optional[float] = None,
     overall_strategy: Optional[str] = None,
+    calibration=None,
 ) -> CardGrade:
     """Build a full :class:`CardGrade` from centering + condition wear scores.
 
     Any of the condition wear scores may be ``None`` (that factor not assessed),
     in which case its sub-grade stays ``None`` and is left out of the overall.
+
+    If ``calibration`` (a ``calibration.Calibration``) is supplied, its data-fit
+    curves replace the static scale lookups for whichever factors it has learned,
+    and its learned weights drive the overall. Factors it hasn't learned fall
+    back to the default scales, so a partially-trained calibration is fine.
     """
-    centering_grade, centering_label = grade_centering(horizontal_ratio, vertical_ratio)
+    # Centering.
+    if calibration is not None and calibration.centering is not None:
+        worse = worse_centering_percent(horizontal_ratio, vertical_ratio)
+        centering_grade = calibration.centering.grade(worse)
+        centering_label = label_for_grade(centering_grade, CENTERING_GRADE_SCALE)
+    else:
+        centering_grade, centering_label = grade_centering(horizontal_ratio, vertical_ratio)
 
     grade = CardGrade(
         centering_ratio_h=horizontal_ratio,
@@ -259,14 +295,35 @@ def build_full_grade(
         centering_grade=centering_grade,
         centering_label=centering_label,
     )
-    if corner_wear is not None:
-        grade.corners, grade.corners_label = grade_corners(corner_wear)
-    if edge_wear is not None:
-        grade.edges, grade.edges_label = grade_edges(edge_wear)
-    if surface_wear is not None:
-        grade.surface, grade.surface_label = grade_surface(surface_wear)
 
-    grade.overall = compute_overall(grade.sub_scores(), strategy=overall_strategy)
+    def _factor(wear, curve, grader, scale):
+        if calibration is not None and curve is not None:
+            g = curve.grade(wear)
+            return g, label_for_grade(g, scale)
+        return grader(wear)
+
+    cal_corners = calibration.corners if calibration is not None else None
+    cal_edges = calibration.edges if calibration is not None else None
+    cal_surface = calibration.surface if calibration is not None else None
+
+    if corner_wear is not None:
+        grade.corners, grade.corners_label = _factor(
+            corner_wear, cal_corners, grade_corners, CORNER_GRADE_SCALE)
+    if edge_wear is not None:
+        grade.edges, grade.edges_label = _factor(
+            edge_wear, cal_edges, grade_edges, EDGE_GRADE_SCALE)
+    if surface_wear is not None:
+        grade.surface, grade.surface_label = _factor(
+            surface_wear, cal_surface, grade_surface, SURFACE_GRADE_SCALE)
+
+    cal_strategy = calibration.overall_strategy if calibration is not None else None
+    cal_weights = calibration.overall_weights if calibration is not None else None
+    if cal_strategy or cal_weights:
+        grade.overall = compute_overall(grade.sub_scores(),
+                                        strategy=cal_strategy or "weighted",
+                                        weights=cal_weights)
+    else:
+        grade.overall = compute_overall(grade.sub_scores(), strategy=overall_strategy)
     return grade
 
 

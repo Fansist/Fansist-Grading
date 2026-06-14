@@ -219,11 +219,16 @@ def grade_image_to_report(
     base_url: str = DEFAULT_BASE_URL,
     cert_id: str | None = None,
     meta: dict | None = None,
+    calibration=None,
 ) -> GradeReport:
-    """Run the pipeline on an image, mint a cert, persist the report + QR."""
+    """Run the pipeline on an image, mint a cert, persist the report + QR.
+
+    ``calibration`` (a ``calibration.Calibration``) applies a learned grade
+    mapping if supplied.
+    """
     from pipeline import run_pipeline
 
-    result = run_pipeline(image_bgr)
+    result = run_pipeline(image_bgr, calibration=calibration)
     report = build_report(result, cert_id=cert_id, base_url=base_url, meta=meta)
     save_report(report, result, store_dir)
     return report
@@ -241,14 +246,21 @@ def _cli(argv: list[str] | None = None) -> int:
     parser.add_argument("--store", default="./cards", help="Report store directory.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL,
                         help="Public base URL the QR points at.")
+    parser.add_argument("--calibration", default=os.environ.get("FANSIST_CALIBRATION"),
+                        help="Path to a trained calibration.json (or set "
+                             "FANSIST_CALIBRATION).")
     args = parser.parse_args(argv)
+
+    from calibration import load_optional
+    calibration = load_optional(args.calibration)
 
     image = cv2.imread(args.image, cv2.IMREAD_COLOR)
     if image is None:
         print(f"error: could not read image {args.image!r}")
         return 2
     try:
-        report = grade_image_to_report(image, args.store, base_url=args.base_url)
+        report = grade_image_to_report(image, args.store, base_url=args.base_url,
+                                       calibration=calibration)
     except Exception as exc:  # detection or processing failure
         print(json.dumps({"error": str(exc)}))
         return 1
@@ -258,6 +270,7 @@ def _cli(argv: list[str] | None = None) -> int:
         "report_url": report.report_url,
         "overall_grade": report.overall_grade,
         "overall_score_1000": report.overall_score_1000,
+        "calibrated": calibration is not None,
         "stored": os.path.join(os.path.abspath(args.store), report.cert_id),
     }, indent=2))
     return 0

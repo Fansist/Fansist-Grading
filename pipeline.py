@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 
@@ -59,13 +60,20 @@ def decode_image(data: bytes) -> np.ndarray | None:
     return cv2.imdecode(buffer, cv2.IMREAD_COLOR)
 
 
-def run_pipeline(image_bgr: np.ndarray, assess_condition: bool = True) -> PipelineResult:
+def run_pipeline(
+    image_bgr: np.ndarray,
+    assess_condition: bool = True,
+    calibration=None,
+) -> PipelineResult:
     """Run the full grade (detect -> centering + corners/edges/surface -> grade).
 
     Args:
         image_bgr: BGR card photo.
         assess_condition: When True (default) grade all four factors. Set False
             for a centering-only pass (faster; condition sub-grades stay None).
+        calibration: Optional ``calibration.Calibration`` learned from graded
+            cards; when given, its data-fit curves/weights replace the static
+            grade scales (see calibration.py / train.py).
 
     Raises:
         CardDetectionError: If the card cannot be located (callers should catch
@@ -90,6 +98,7 @@ def run_pipeline(image_bgr: np.ndarray, assess_condition: bool = True) -> Pipeli
         corner_wear=corner_wear,
         edge_wear=edge_wear,
         surface_wear=surface_wear,
+        calibration=calibration,
     )
     return PipelineResult(
         detection=detection,
@@ -99,6 +108,35 @@ def run_pipeline(image_bgr: np.ndarray, assess_condition: bool = True) -> Pipeli
         edges=edge_res,
         surface=surface_res,
     )
+
+
+# Feature names the calibration/training code learns from (raw, pre-grade).
+FEATURE_NAMES = ("centering_worse", "corner_wear", "edge_wear", "surface_wear")
+
+
+def features_from_result(result: PipelineResult) -> dict:
+    """Extract the raw, pre-grade features a calibration is trained on.
+
+    These are exactly the numbers the static grade scales map to a grade, so a
+    learned curve over them is a drop-in replacement. Missing (un-assessed)
+    factors are omitted.
+    """
+    from grading import worse_centering_percent
+
+    c = result.centering
+    feats = {"centering_worse": worse_centering_percent(c.horizontal_ratio, c.vertical_ratio)}
+    if result.corners is not None:
+        feats["corner_wear"] = result.corners.wear
+    if result.edges is not None:
+        feats["edge_wear"] = result.edges.wear
+    if result.surface is not None:
+        feats["surface_wear"] = result.surface.wear
+    return feats
+
+
+def extract_features(image_bgr: np.ndarray) -> dict:
+    """Detect + measure a card and return its raw features (no grade applied)."""
+    return features_from_result(run_pipeline(image_bgr))
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +244,14 @@ def _cli(argv: list[str] | None = None) -> int:
         help="If set, write annotated images to <prefix>_original.png and "
              "<prefix>_rectified.png.",
     )
+    parser.add_argument(
+        "--calibration", default=os.environ.get("FANSIST_CALIBRATION"),
+        help="Path to a trained calibration.json (or set FANSIST_CALIBRATION).",
+    )
     args = parser.parse_args(argv)
+
+    from calibration import load_optional
+    calibration = load_optional(args.calibration)
 
     image_bgr = cv2.imread(args.image, cv2.IMREAD_COLOR)
     if image_bgr is None:
@@ -214,7 +259,7 @@ def _cli(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result = run_pipeline(image_bgr)
+        result = run_pipeline(image_bgr, calibration=calibration)
     except CardDetectionError as exc:
         print(json.dumps({"error": "card_detection_failed", "detail": str(exc)}))
         return 1

@@ -57,6 +57,41 @@ Streamlit will open a browser tab. Upload a card photo and the app will display:
 If detection fails, you'll get a clear message (poor contrast, busy background,
 glare, card too small in frame) instead of a crash.
 
+### Headless use (CLI / library)
+
+All the actual work lives in `pipeline.py`, which has **no Streamlit
+dependency** — so you can grade without the UI (and the automated machine in
+[`docs/HARDWARE_BLUEPRINT.md`](docs/HARDWARE_BLUEPRINT.md) calls it the same way):
+
+```bash
+# Print the grade as JSON, and (optionally) save annotated images.
+python pipeline.py path/to/card.jpg --out-prefix out/card
+```
+
+```python
+# Or as a library:
+import cv2
+from pipeline import run_pipeline
+
+result = run_pipeline(cv2.imread("card.jpg"))
+print(result.grade.to_dict())          # centering grade now; corner/edge/surface stubs
+```
+
+`run_pipeline` raises `card_detector.CardDetectionError` on a no-detect; the CLI
+turns that into an error JSON and a non-zero exit code.
+
+### Testing
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite uses **synthetic cards with known margins** (`tests/conftest.py`) to
+check detection/deskew, margin measurement (both inner-border methods), the
+grade scale, overall combination, and the end-to-end pipeline — no real photos
+needed.
+
 ---
 
 ## 📸 Imaging guidelines (read this — it determines result quality)
@@ -112,12 +147,16 @@ Inner-border appearance varies a lot by card, so the flaky steps expose tunable
 ## Project structure
 
 ```
-card_detector.py   Locate the card; return a deskewed, top-down crop + corners.
-centering.py       Detect the inner border; measure margins + centering ratios.
-grading.py         Map ratios to a sub-grade; CardGrade dataclass (+ stubs).
-app.py             Streamlit UI tying it all together.
-requirements.txt   Minimal dependencies (OpenCV, NumPy, Streamlit).
-README.md          This file.
+card_detector.py       Locate the card; return a deskewed, top-down crop + corners.
+centering.py           Detect the inner border; measure margins + centering ratios.
+grading.py             Map ratios to a sub-grade; CardGrade dataclass (+ stubs).
+pipeline.py            Headless detect->measure->grade + decode + annotate + CLI.
+app.py                 Streamlit UI (thin layer over pipeline.py).
+tests/                 pytest suite + synthetic-card fixtures.
+requirements.txt       Runtime deps (OpenCV, NumPy, Streamlit).
+requirements-dev.txt   Test deps (adds pytest).
+docs/                  HARDWARE_BLUEPRINT.md — the imaging/slabbing machine design.
+README.md              This file.
 ```
 
 ---

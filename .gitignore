@@ -6,6 +6,11 @@ __pycache__/
 build/
 dist/
 
+# Test / tooling caches
+.pytest_cache/
+.coverage
+htmlcov/
+
 # Virtual environments
 .venv/
 venv/

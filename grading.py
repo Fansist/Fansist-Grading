@@ -80,6 +80,19 @@ class CardGrade:
             "surface": self.surface,
         }
 
+    def to_dict(self) -> dict:
+        """Plain-dict view of the grade for JSON output (UI, CLI, traceability)."""
+        return {
+            "centering_ratio_h": list(self.centering_ratio_h),
+            "centering_ratio_v": list(self.centering_ratio_v),
+            "centering_grade": self.centering_grade,
+            "centering_label": self.centering_label,
+            "corners": self.corners,
+            "edges": self.edges,
+            "surface": self.surface,
+            "overall": self.overall,
+        }
+
 
 def worse_centering_percent(
     horizontal_ratio: tuple[float, float],

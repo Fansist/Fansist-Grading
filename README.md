@@ -1,15 +1,16 @@
-# 🃏 Trading Card Centering Grader (v1)
+# 🃏 Trading Card Grader
 
 A small, runnable Python app that analyses a single photo of a trading card and
-produces a **centering grade** — the most tractable part of card grading (à la
-TAG/PSA). It locates the card, flattens it with a perspective transform, finds
-the inner border, measures the four margins, and maps the centering ratios to a
-sub-grade.
+produces a **full grade** (à la TAG/PSA) from four factors — **centering,
+corners, edges, and surface** — combined into an overall grade. It locates the
+card, flattens it with a perspective transform, then measures each factor on the
+rectified image.
 
-**v1 is centering only.** No machine learning, no hardware, no live camera, no
-batch processing. The code is deliberately architected so that corner, edge, and
-surface grading can be added later without rewriting the core (see
-[Next steps / extending](#next-steps--extending)).
+**Classic computer vision, no ML.** No machine learning, no hardware, no live
+camera, no batch processing — just OpenCV + NumPy with tunable constants, so the
+whole thing is transparent and runnable anywhere. The four graders are
+independent, easy-to-tune modules; see [Accuracy & honesty](#accuracy--honesty)
+for what each factor can and can't see from a single flat photo.
 
 ---
 
@@ -22,19 +23,30 @@ surface grading can be added later without rewriting the core (see
    **All downstream measurements run on this rectified image**, so rotation and
    skew don't corrupt the numbers.
 
-2. **Inner border + centering** (`centering.py`)
-   On the rectified card, detect the inner border (where the outer margin meets
-   the artwork), measure the left/right/top/bottom margin widths in pixels, and
+2. **Centering** (`centering.py`)
+   Detect the inner border, measure the left/right/top/bottom margins, and
    compute `horizontal = left:right` and `vertical = top:bottom`, each
    normalised to sum to 100 (e.g. `55/45`).
 
-3. **Grading** (`grading.py`)
-   Map the centering ratios to a sub-grade using a documented, easy-to-edit
-   threshold table, and assemble a `CardGrade` object.
+3. **Corners** (`corners.py`)
+   Inspect each corner's border region for whitening (exposed light core) and
+   chipping (darkening), producing a per-corner wear score.
 
-4. **UI** (`app.py`)
-   A Streamlit page to upload an image and view the original, the annotated
-   rectified card, and the numeric results.
+4. **Edges** (`edges.py`)
+   Scan a thin band along each edge for the same whitening/chipping anomalies.
+
+5. **Surface** (`surface.py`)
+   High-pass the artwork and flag statistical outliers (scratches/print lines)
+   as a surface-defect density.
+
+6. **Grading** (`grading.py`)
+   Map each factor to a sub-grade via its own documented threshold table, and
+   combine the present sub-grades into an `overall` (`weighted` / `lowest` /
+   `average`, selectable) on a `CardGrade` object.
+
+7. **Orchestration + UI** (`pipeline.py`, `app.py`)
+   `pipeline.py` runs all of the above headless (also a CLI/library); `app.py`
+   is the Streamlit UI showing the annotated images and the grades.
 
 ---
 
@@ -50,9 +62,10 @@ streamlit run app.py
 Streamlit will open a browser tab. Upload a card photo and the app will display:
 
 - the original image with the detected card outline,
-- the rectified card with the outer edge + inner border drawn and the four
-  margin widths labelled,
-- the L/R ratio, T/B ratio, and centering grade.
+- the rectified card with the outer edge + inner border + margin widths,
+- a **condition view** (corners/edges coloured green→red by wear; surface
+  defects overlaid in red),
+- the four sub-grades (centering, corners, edges, surface) and the **overall**.
 
 If detection fails, you'll get a clear message (poor contrast, busy background,
 glare, card too small in frame) instead of a crash.
@@ -74,11 +87,13 @@ import cv2
 from pipeline import run_pipeline
 
 result = run_pipeline(cv2.imread("card.jpg"))
-print(result.grade.to_dict())          # centering grade now; corner/edge/surface stubs
+print(result.grade.to_dict())          # all four sub-grades + overall
+# run_pipeline(img, assess_condition=False) -> centering-only, faster
 ```
 
 `run_pipeline` raises `card_detector.CardDetectionError` on a no-detect; the CLI
-turns that into an error JSON and a non-zero exit code.
+turns that into an error JSON and a non-zero exit code, and `--out-prefix` saves
+`_original`, `_rectified`, and `_condition` annotated PNGs.
 
 ### Testing
 
@@ -87,10 +102,11 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The suite uses **synthetic cards with known margins** (`tests/conftest.py`) to
-check detection/deskew, margin measurement (both inner-border methods), the
-grade scale, overall combination, and the end-to-end pipeline — no real photos
-needed.
+The suite uses **synthetic cards with known margins/defects** (`tests/conftest.py`)
+to check detection/deskew, margin measurement (both inner-border methods), the
+corner/edge/surface assessors (clean → pristine, damage → higher wear), every
+grade scale, the overall-combination strategies, and the end-to-end pipeline —
+no real photos needed.
 
 ---
 
@@ -125,12 +141,19 @@ For best results:
 Inner-border appearance varies a lot by card, so the flaky steps expose tunable
 **constants at the top of each file**:
 
-- `card_detector.py` — blur kernel, Canny thresholds, minimum card area,
+- `card_detector.py` — blur kernel, Canny thresholds, min/max card area,
   polygon-approximation epsilon, max processing dimension.
 - `centering.py` — detection strategy (`INNER_BORDER_METHOD`), search margins,
   gradient/Sobel parameters, and the expected border colour range
   (`EXPECTED_BORDER_HSV_*`) for the colour-based method.
-- `grading.py` — the `CENTERING_GRADE_SCALE` threshold table.
+- `corners.py` / `edges.py` — ROI/band sizes, edge inset, the whitening/chipping
+  anomaly thresholds (`BRIGHT_DELTA` / `DARK_DELTA` / `SAT_MAX`), and the
+  worst-region weighting.
+- `surface.py` — high-pass kernel, `DEFECT_SIGMA` / `DEFECT_MIN_ABS`, minimum
+  defect-blob area, and the inner-region margin.
+- `grading.py` — every grade scale (`CENTERING_GRADE_SCALE`,
+  `CORNER_/EDGE_/SURFACE_GRADE_SCALE`) and the overall combination
+  (`OVERALL_STRATEGY` + `OVERALL_WEIGHTS`).
 
 ### Two inner-border detection strategies
 
@@ -149,8 +172,12 @@ Inner-border appearance varies a lot by card, so the flaky steps expose tunable
 ```
 card_detector.py       Locate the card; return a deskewed, top-down crop + corners.
 centering.py           Detect the inner border; measure margins + centering ratios.
-grading.py             Map ratios to a sub-grade; CardGrade dataclass (+ stubs).
-pipeline.py            Headless detect->measure->grade + decode + annotate + CLI.
+corners.py             Per-corner whitening/chipping -> corner wear score.
+edges.py               Per-edge whitening/chipping -> edge wear score.
+surface.py             High-pass defect detection -> surface defect score.
+condition_utils.py     Shared border-reference / anomaly helpers for corners+edges.
+grading.py             Map each factor to a sub-grade; combine into overall; CardGrade.
+pipeline.py            Headless detect -> 4 factors -> grade + decode + annotate + CLI.
 app.py                 Streamlit UI (thin layer over pipeline.py).
 tests/                 pytest suite + synthetic-card fixtures.
 requirements.txt       Runtime deps (OpenCV, NumPy, Streamlit).
@@ -161,41 +188,58 @@ README.md              This file.
 
 ---
 
+## Accuracy & honesty
+
+These are **automated estimates from a single, evenly-lit photo**, not official
+grades. What each factor can actually see:
+
+- **Centering** — the most reliable factor: it's a geometric measurement, robust
+  once the card is detected and rectified.
+- **Corners / edges** — detect **colour anomalies**: whitening (light core
+  showing through a worn/chipped border) and darkening (a chip exposing the
+  background). Works best on **dark-bordered** cards; on white-bordered cards
+  whitening is invisible and only chips register. Glare reads as false wear.
+- **Surface** — the **lowest-confidence** factor. Fine scratches and dents are
+  revealed by *raking* (low-angle) light and multiple exposures, which a single
+  flat photo doesn't have, so this is a coarse "cleanliness" proxy and can be
+  fooled by busy artwork. `surface.py` already accepts extra-lighting frames
+  (`assess_surface(..., extra_frames=...)`) for when that capture exists.
+
+Tune the per-factor constants (see [Tuning](#tuning)) and the
+`OVERALL_STRATEGY` to your card type and standard.
+
 ## Next steps / extending
 
-The grade schema is already structured for the full four-factor grade. The
-`CardGrade` dataclass (`grading.py`) carries `corners`, `edges`, and `surface`
-fields that default to `None`, and `compute_overall()` averages only the
-sub-scores that are present — so each new grader plugs in without touching the
-core:
+The four-factor grade is implemented; natural extensions:
 
-- **Corners** — crop each corner from the *rectified* image (already deskewed)
-  and score sharpness/whitening. Populate `CardGrade.corners`.
-- **Edges** — scan the four edges of the rectified card for chipping/whitening.
-  Populate `CardGrade.edges`.
-- **Surface** — detect scratches, print lines, and dents (this is where an ML
-  model would eventually go). Populate `CardGrade.surface`.
+- **Better surface grading** via the multi-angle/raking-light captures described
+  in the hardware blueprint (the `extra_frames` hook is already there), and/or a
+  trained ML defect detector dropped in behind the same `assess_surface` API.
+- **Back-of-card grading** — run the same pipeline on the reverse and combine.
+- **Per-card-type profiles** — bundle constant presets (e.g. modern holo vs.
+  vintage white-border) and auto-select.
+- **Calibration to a known standard** — fit the thresholds against
+  human-graded cards.
 
-For each: add a module mirroring `centering.py`, call it from `run_pipeline()`
-in `app.py`, set the corresponding field on the `CardGrade`, and `compute_overall`
-will automatically fold it into the overall grade. Adjust the combination rule
-in `compute_overall()` (average vs. lowest-sub-grade-wins vs. weighted) to match
-your target grading standard.
+Each grader is an independent module returning a `[0,1]` wear score that
+`grading.build_full_grade` maps to a sub-grade, and `compute_overall` folds into
+the overall — so swapping or improving any one factor never touches the others.
 
 ### Hardware: automated imaging + slabbing machine
 
 A full engineering blueprint for a machine that photographs cards under
 controlled lighting and encapsulates them into sealed slabs — the hardware
 front-end/back-end for this software — lives in
-[`docs/HARDWARE_BLUEPRINT.md`](docs/HARDWARE_BLUEPRINT.md). It is designed to
-call this repo's pipeline as a library and to light up the corner/edge/surface
-modules above via multi-angle captures, with no change to the core schema.
+[`docs/HARDWARE_BLUEPRINT.md`](docs/HARDWARE_BLUEPRINT.md). It calls this repo's
+pipeline as a library and supplies the multi-angle captures that make the
+surface (and corner/edge) grading materially better.
 
 ---
 
-## Limitations (v1)
+## Limitations
 
-- Centering only — corners, edges, and surface are stubbed, not graded.
+- Single, evenly-lit photo: see [Accuracy & honesty](#accuracy--honesty) — surface
+  is the weakest factor; corner/edge wear is colour-based.
 - Classic CV detection: sensitive to lighting/background as described above.
-- Assumes one card, photographed roughly flat and filling the frame.
+- Assumes one card (front), photographed roughly flat and filling the frame.
 - The grade is an automated estimate for triage/fun, **not** an official grade.

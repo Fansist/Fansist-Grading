@@ -24,6 +24,7 @@ import streamlit as st
 
 from card_detector import CardDetectionError
 from pipeline import (
+    annotate_condition,
     annotate_original,
     annotate_rectified,
     decode_image,
@@ -54,44 +55,67 @@ def render_results(image_bgr: np.ndarray) -> None:
         return
 
     detection, centering, grade = result.detection, result.centering, result.grade
+    rectified = detection.rectified
 
-    col_a, col_b = st.columns(2)
+    # --- Overall grade headline ---------------------------------------------
+    if grade.overall is not None:
+        st.subheader(f"Overall grade: {grade.overall:g}")
+
+    g1, g2, g3, g4 = st.columns(4)
+    g1.metric("Centering", f"{grade.centering_grade:g}", grade.centering_label)
+    g2.metric("Corners", "—" if grade.corners is None else f"{grade.corners:g}",
+              grade.corners_label or None)
+    g3.metric("Edges", "—" if grade.edges is None else f"{grade.edges:g}",
+              grade.edges_label or None)
+    g4.metric("Surface", "—" if grade.surface is None else f"{grade.surface:g}",
+              grade.surface_label or None)
+
+    # --- Annotated images ----------------------------------------------------
+    col_a, col_b, col_c = st.columns(3)
     with col_a:
-        st.subheader("Original (detected outline)")
+        st.caption("Original (detected outline)")
         st.image(_bgr_to_rgb(annotate_original(detection)), use_container_width=True)
     with col_b:
-        st.subheader("Rectified card + measurements")
+        st.caption("Centering (outer edge, inner border, margins)")
+        st.image(_bgr_to_rgb(annotate_rectified(rectified, centering)),
+                 use_container_width=True)
+    with col_c:
+        st.caption("Condition (corners/edges by wear; surface defects in red)")
         st.image(
-            _bgr_to_rgb(annotate_rectified(detection.rectified, centering)),
+            _bgr_to_rgb(annotate_condition(rectified, result.corners, result.edges,
+                                           result.surface)),
             use_container_width=True,
         )
 
-    st.subheader("Centering results")
+    # --- Numeric detail ------------------------------------------------------
     h_left, h_right = centering.horizontal_ratio
     v_top, v_bottom = centering.vertical_ratio
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Horizontal (L : R)", f"{h_left:.0f} / {h_right:.0f}")
-    m2.metric("Vertical (T : B)", f"{v_top:.0f} / {v_bottom:.0f}")
-    m3.metric("Centering grade", f"{grade.centering_grade:g}", grade.centering_label)
-
     st.caption(
-        f"Margins (px) -- left {centering.left}, right {centering.right}, "
-        f"top {centering.top}, bottom {centering.bottom}. "
-        f"Inner-border method: {centering.method}."
+        f"Centering ratios — L:R {h_left:.0f}/{h_right:.0f}, "
+        f"T:B {v_top:.0f}/{v_bottom:.0f}. "
+        f"Margins (px) L {centering.left}, R {centering.right}, "
+        f"T {centering.top}, B {centering.bottom}. Method: {centering.method}."
     )
 
-    with st.expander("Full grade object (centering only in v1)"):
+    st.warning(
+        "These are automated estimates from a single image. Corners and edges "
+        "measure colour whitening/chipping; **surface** is the lowest-confidence "
+        "factor from one flat photo (true scratch/dent detection needs raking "
+        "light — see the hardware blueprint). Not an official grade."
+    )
+
+    with st.expander("Full grade object (JSON)"):
         st.json(grade.to_dict())
 
 
 def main() -> None:
-    st.set_page_config(page_title="Card Centering Grader", page_icon="🃏", layout="wide")
-    st.title("🃏 Trading Card Centering Grader (v1)")
+    st.set_page_config(page_title="Card Grader", page_icon="🃏", layout="wide")
+    st.title("🃏 Trading Card Grader")
     st.write(
         "Upload a single photo of a trading card on a **plain, high-contrast "
         "background** with even, glare-free lighting and the camera held "
-        "parallel to the card. v1 grades **centering only**."
+        "parallel to the card. Grades **centering, corners, edges and surface**, "
+        "then combines them into an overall grade."
     )
 
     uploaded = st.file_uploader(

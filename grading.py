@@ -1,16 +1,19 @@
 """grading.py
 
-Map centering ratios to a centering sub-grade and assemble a card grade.
+Map raw measurements to sub-grades and assemble a full card grade.
 
-v1 grades CENTERING ONLY. The :class:`CardGrade` dataclass already carries
-stubbed ``corners`` / ``edges`` / ``surface`` fields (default ``None``) and an
-``overall`` that is computed from whatever sub-scores are present. When those
-other graders are added later, they drop straight into the same structure and
-:func:`compute_overall` starts including them -- no rewrite of the core needed.
+This now grades all FOUR factors:
+  * centering -- from the L:R / T:B ratios (``centering.py``).
+  * corners   -- from a corner-wear score (``corners.py``).
+  * edges     -- from an edge-wear score (``edges.py``).
+  * surface   -- from a surface-defect score (``surface.py``).
 
-The centering scale below is intentionally a plain, easy-to-edit table of
-thresholds (loosely modelled on hobby grading tolerances). Tune the numbers to
-match the grading standard you care about.
+Each factor has its own plain, easy-to-edit threshold table (loosely modelled on
+hobby grading scales). The overall grade is combined from whichever sub-scores
+are present via :func:`compute_overall`, with a selectable strategy
+(weighted / lowest / average). A sub-score left as ``None`` is simply omitted,
+so the schema and combiner are unchanged whether you grade one factor or all
+four. Tune all the numbers below to match the grading standard you care about.
 """
 
 from __future__ import annotations
@@ -45,18 +48,62 @@ CENTERING_GRADE_SCALE: list[tuple[float, float, str]] = [
 # last row covers up to 100, so this should never trigger in practice.
 _WORST_GRADE: tuple[float, str] = (1.0, "Poor")
 
+# ---------------------------------------------------------------------------
+# Condition (corners / edges / surface) grade scales
+# ---------------------------------------------------------------------------
+#
+# Corners, edges and surface each produce a "wear" / "defect" score in [0, 1]
+# (0 = pristine, 1 = worst). Each row is (max_wear, grade_value, label); the
+# first row whose threshold the card meets (wear <= max_wear) wins, so keep the
+# tables ordered from best (cleanest) to worst.
+#
+# They are SEPARATE tables (even though they start identical) so each factor can
+# be tuned independently -- e.g. surface tolerance is usually the flakiest.
+CORNER_GRADE_SCALE: list[tuple[float, float, str]] = [
+    (0.02, 10.0, "Gem Mint"),
+    (0.05, 9.0, "Mint"),
+    (0.10, 8.0, "NM-MT"),
+    (0.18, 7.0, "Near Mint"),
+    (0.28, 6.0, "EX-MT"),
+    (0.40, 5.0, "Excellent"),
+    (0.55, 4.0, "VG-EX"),
+    (0.75, 3.0, "Very Good"),
+    (1.01, 1.0, "Poor"),
+]
+EDGE_GRADE_SCALE: list[tuple[float, float, str]] = list(CORNER_GRADE_SCALE)
+SURFACE_GRADE_SCALE: list[tuple[float, float, str]] = list(CORNER_GRADE_SCALE)
+
+# ---------------------------------------------------------------------------
+# Overall-grade combination
+# ---------------------------------------------------------------------------
+#
+# How to combine the present sub-grades into an overall:
+#   "weighted" -- weighted mean using OVERALL_WEIGHTS (default).
+#   "lowest"   -- the single worst sub-grade governs (conservative, PSA-ish).
+#   "average"  -- plain mean of present sub-grades.
+OVERALL_STRATEGY: str = "weighted"
+
+# Weights for the "weighted" strategy. Only the present sub-scores' weights are
+# used (renormalised), so this is correct whether 1 or 4 factors are graded.
+OVERALL_WEIGHTS: dict[str, float] = {
+    "centering": 0.20,
+    "corners": 0.30,
+    "edges": 0.20,
+    "surface": 0.30,
+}
+
 
 @dataclass
 class CardGrade:
-    """A card grade. v1 fills only the centering fields; the rest are stubs.
+    """A full card grade: four sub-grades plus a combined overall.
 
     Attributes:
         centering_ratio_h: (left%, right%) horizontal centering, summing to 100.
         centering_ratio_v: (top%, bottom%) vertical centering, summing to 100.
-        centering_grade: Numeric centering sub-grade (e.g. 1-10).
-        centering_label: Human-readable label for the centering sub-grade.
-        corners / edges / surface: Future sub-grades, ``None`` until implemented.
-        overall: Combined grade computed from the available sub-scores.
+        centering_grade / centering_label: centering sub-grade + label.
+        corners / edges / surface: condition sub-grades (``None`` if a factor was
+            not assessed); each has a matching ``*_label``.
+        overall: Combined grade computed from the present sub-scores.
     """
 
     centering_ratio_h: tuple[float, float]
@@ -64,15 +111,18 @@ class CardGrade:
     centering_grade: float
     centering_label: str = ""
 
-    # --- Stubs for future grading dimensions (kept None in v1) ---------------
+    # --- Condition sub-grades (None if that factor was not assessed) ---------
     corners: Optional[float] = None
+    corners_label: str = ""
     edges: Optional[float] = None
+    edges_label: str = ""
     surface: Optional[float] = None
+    surface_label: str = ""
 
     overall: Optional[float] = field(default=None)
 
     def sub_scores(self) -> dict[str, Optional[float]]:
-        """All sub-scores by name, including the not-yet-implemented stubs."""
+        """All sub-scores by name (``None`` where a factor wasn't assessed)."""
         return {
             "centering": self.centering_grade,
             "corners": self.corners,
@@ -88,8 +138,11 @@ class CardGrade:
             "centering_grade": self.centering_grade,
             "centering_label": self.centering_label,
             "corners": self.corners,
+            "corners_label": self.corners_label,
             "edges": self.edges,
+            "edges_label": self.edges_label,
             "surface": self.surface,
+            "surface_label": self.surface_label,
             "overall": self.overall,
         }
 
@@ -118,26 +171,86 @@ def grade_centering(
     return _WORST_GRADE
 
 
-def compute_overall(sub_scores: dict[str, Optional[float]]) -> Optional[float]:
-    """Combine the available sub-scores into an overall grade.
+def _grade_from_wear(
+    wear: float, scale: list[tuple[float, float, str]]
+) -> tuple[float, str]:
+    """Map a [0, 1] wear/defect score to (grade_value, label) via a scale table."""
+    for max_wear, grade_value, label in scale:
+        if wear <= max_wear:
+            return grade_value, label
+    return _WORST_GRADE
 
-    v1 has only centering, so the overall simply equals it. The implementation
-    averages every sub-score that is present (ignoring ``None`` stubs), so when
-    corners/edges/surface are added later they are included automatically with
-    no change here. Swap the averaging for a "lowest sub-grade wins" or weighted
-    rule if your grading standard requires it.
+
+def grade_corners(wear: float) -> tuple[float, str]:
+    """Map a corner-wear score (0=pristine..1=worst) to (grade, label)."""
+    return _grade_from_wear(wear, CORNER_GRADE_SCALE)
+
+
+def grade_edges(wear: float) -> tuple[float, str]:
+    """Map an edge-wear score (0=pristine..1=worst) to (grade, label)."""
+    return _grade_from_wear(wear, EDGE_GRADE_SCALE)
+
+
+def grade_surface(wear: float) -> tuple[float, str]:
+    """Map a surface-defect score (0=clean..1=worst) to (grade, label)."""
+    return _grade_from_wear(wear, SURFACE_GRADE_SCALE)
+
+
+def _round_half(value: float) -> float:
+    """Round to the nearest 0.5 (grades are usually whole or half steps)."""
+    return round(value * 2.0) / 2.0
+
+
+def compute_overall(
+    sub_scores: dict[str, Optional[float]],
+    strategy: Optional[str] = None,
+) -> Optional[float]:
+    """Combine the present sub-scores into an overall grade.
+
+    Only sub-scores that are not ``None`` are considered, so this is correct
+    whether one factor or all four are graded (a card with only centering simply
+    returns the centering grade). The ``strategy`` (default ``OVERALL_STRATEGY``)
+    selects how present sub-scores combine: ``"weighted"`` / ``"lowest"`` /
+    ``"average"``. Result is rounded to the nearest 0.5.
     """
-    present = [score for score in sub_scores.values() if score is not None]
+    strategy = strategy or OVERALL_STRATEGY
+    present = {name: score for name, score in sub_scores.items() if score is not None}
     if not present:
         return None
-    return round(sum(present) / len(present), 1)
+    values = list(present.values())
+
+    if strategy == "lowest":
+        raw = min(values)
+    elif strategy == "average":
+        raw = sum(values) / len(values)
+    elif strategy == "weighted":
+        weights = {name: OVERALL_WEIGHTS.get(name, 0.0) for name in present}
+        total_w = sum(weights.values())
+        if total_w <= 0:  # no configured weights -> fall back to a plain mean
+            raw = sum(values) / len(values)
+        else:
+            raw = sum(present[name] * weights[name] for name in present) / total_w
+    else:
+        raise ValueError(
+            f"Unknown overall strategy {strategy!r}; expected "
+            "'weighted', 'lowest', or 'average'."
+        )
+    return _round_half(raw)
 
 
-def build_grade(
+def build_full_grade(
     horizontal_ratio: tuple[float, float],
     vertical_ratio: tuple[float, float],
+    corner_wear: Optional[float] = None,
+    edge_wear: Optional[float] = None,
+    surface_wear: Optional[float] = None,
+    overall_strategy: Optional[str] = None,
 ) -> CardGrade:
-    """Build a :class:`CardGrade` from centering ratios (v1 entry point)."""
+    """Build a full :class:`CardGrade` from centering + condition wear scores.
+
+    Any of the condition wear scores may be ``None`` (that factor not assessed),
+    in which case its sub-grade stays ``None`` and is left out of the overall.
+    """
     centering_grade, centering_label = grade_centering(horizontal_ratio, vertical_ratio)
 
     grade = CardGrade(
@@ -146,5 +259,20 @@ def build_grade(
         centering_grade=centering_grade,
         centering_label=centering_label,
     )
-    grade.overall = compute_overall(grade.sub_scores())
+    if corner_wear is not None:
+        grade.corners, grade.corners_label = grade_corners(corner_wear)
+    if edge_wear is not None:
+        grade.edges, grade.edges_label = grade_edges(edge_wear)
+    if surface_wear is not None:
+        grade.surface, grade.surface_label = grade_surface(surface_wear)
+
+    grade.overall = compute_overall(grade.sub_scores(), strategy=overall_strategy)
     return grade
+
+
+def build_grade(
+    horizontal_ratio: tuple[float, float],
+    vertical_ratio: tuple[float, float],
+) -> CardGrade:
+    """Build a centering-only :class:`CardGrade` (condition factors left as stubs)."""
+    return build_full_grade(horizontal_ratio, vertical_ratio)

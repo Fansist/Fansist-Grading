@@ -30,9 +30,11 @@ from pipeline import (
     annotate_original,
     annotate_rectified,
     decode_image,
-    run_pipeline,
+    grade_card,
 )
 from report import DEFAULT_BASE_URL, build_report, make_qr_png_bytes, save_report
+
+_TYPES = ["jpg", "jpeg", "png", "bmp", "webp"]
 
 
 def _bgr_to_rgb(image: np.ndarray) -> np.ndarray:
@@ -40,34 +42,52 @@ def _bgr_to_rgb(image: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 
-def render_results(image_bgr: np.ndarray) -> None:
-    """Run the pipeline on the uploaded image and render all outputs."""
+def _render_side(label: str | None, result) -> None:
+    """Show one side's three annotated images."""
+    if label:
+        st.markdown(f"**{label}**")
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.caption("Original (detected outline)")
+        st.image(_bgr_to_rgb(annotate_original(result.detection)), use_container_width=True)
+    with col_b:
+        st.caption("Centering (outer edge, inner border, margins)")
+        st.image(_bgr_to_rgb(annotate_rectified(result.detection.rectified, result.centering)),
+                 use_container_width=True)
+    with col_c:
+        st.caption("Condition (corners/edges by wear; surface defects in red)")
+        st.image(_bgr_to_rgb(annotate_condition(result.detection.rectified, result.corners,
+                                                result.edges, result.surface)),
+                 use_container_width=True)
+
+
+def render_results(front_bgr: np.ndarray, back_bgr: np.ndarray | None = None) -> None:
+    """Grade the card (front + optional back) and render all outputs."""
     from calibration import load_optional
     calibration = load_optional(os.environ.get("FANSIST_CALIBRATION"))
     try:
-        result = run_pipeline(image_bgr, calibration=calibration)
+        ts = grade_card(front_bgr, back_bgr, calibration=calibration)
     except CardDetectionError as exc:
         st.error(
             "Could not detect the card.\n\n"
             f"**Reason:** {exc}\n\n"
-            "Tips: use a plain, high-contrast background, make sure the whole "
-            "card is in frame and fills most of it, avoid glare and shadows, "
-            "and hold the camera parallel to the card."
+            "Tips: plain high-contrast background, whole card in frame, no glare, "
+            "camera parallel to the card. (If you added a back image, check it too.)"
         )
         return
     except Exception as exc:  # pragma: no cover - defensive guard for the UI
         st.error(f"Unexpected error while processing the image: {exc}")
         return
 
-    detection, centering, grade = result.detection, result.centering, result.grade
-    rectified = detection.rectified
+    front, back, grade = ts.front, ts.back, ts.combined
 
     # --- Overall grade headline ---------------------------------------------
     if grade.overall is not None:
         st.subheader(f"Overall grade: {grade.overall:g}")
+    if back is not None:
+        st.caption("Graded from **front + back** (worse side per factor).")
     if calibration is not None:
-        st.caption("⚙️ Calibrated to your graded-card dataset "
-                   "(FANSIST_CALIBRATION).")
+        st.caption("⚙️ Calibrated to your graded-card dataset (FANSIST_CALIBRATION).")
 
     g1, g2, g3, g4 = st.columns(4)
     g1.metric("Centering", f"{grade.centering_grade:g}", grade.centering_label)
@@ -78,38 +98,16 @@ def render_results(image_bgr: np.ndarray) -> None:
     g4.metric("Surface", "—" if grade.surface is None else f"{grade.surface:g}",
               grade.surface_label or None)
 
-    # --- Annotated images ----------------------------------------------------
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        st.caption("Original (detected outline)")
-        st.image(_bgr_to_rgb(annotate_original(detection)), use_container_width=True)
-    with col_b:
-        st.caption("Centering (outer edge, inner border, margins)")
-        st.image(_bgr_to_rgb(annotate_rectified(rectified, centering)),
-                 use_container_width=True)
-    with col_c:
-        st.caption("Condition (corners/edges by wear; surface defects in red)")
-        st.image(
-            _bgr_to_rgb(annotate_condition(rectified, result.corners, result.edges,
-                                           result.surface)),
-            use_container_width=True,
-        )
-
-    # --- Numeric detail ------------------------------------------------------
-    h_left, h_right = centering.horizontal_ratio
-    v_top, v_bottom = centering.vertical_ratio
-    st.caption(
-        f"Centering ratios — L:R {h_left:.0f}/{h_right:.0f}, "
-        f"T:B {v_top:.0f}/{v_bottom:.0f}. "
-        f"Margins (px) L {centering.left}, R {centering.right}, "
-        f"T {centering.top}, B {centering.bottom}. Method: {centering.method}."
-    )
+    # --- Annotated images (per side) ----------------------------------------
+    _render_side("Front" if back is not None else None, front)
+    if back is not None:
+        _render_side("Back", back)
 
     st.warning(
-        "These are automated estimates from a single image. Corners and edges "
-        "measure colour whitening/chipping; **surface** is the lowest-confidence "
-        "factor from one flat photo (true scratch/dent detection needs raking "
-        "light — see the hardware blueprint). Not an official grade."
+        "Automated estimates. Corners and edges measure colour whitening/chipping; "
+        "**surface** is the lowest-confidence factor from a flat photo (true "
+        "scratch/dent detection needs raking light — see the hardware blueprint). "
+        "Not an official grade."
     )
 
     with st.expander("Full grade object (JSON)"):
@@ -117,10 +115,11 @@ def render_results(image_bgr: np.ndarray) -> None:
 
     # --- Slab QR + shareable report -----------------------------------------
     base_url = os.environ.get("FANSIST_BASE_URL", DEFAULT_BASE_URL)
-    report = build_report(result, base_url=base_url)
+    report = build_report(front, base_url=base_url, back=back,
+                          combined=grade if back is not None else None)
     store = os.environ.get("FANSIST_STORE")
     if store:  # persist so the web report page (web_report.py) can serve it
-        save_report(report, result, store)
+        save_report(report, front, store, back_result=back)
 
     st.subheader("Slab QR & report")
     qr_col, info_col = st.columns([1, 3])
@@ -142,26 +141,35 @@ def main() -> None:
     st.set_page_config(page_title="Card Grader", page_icon="🃏", layout="wide")
     st.title("🃏 Trading Card Grader")
     st.write(
-        "Upload a single photo of a trading card on a **plain, high-contrast "
-        "background** with even, glare-free lighting and the camera held "
-        "parallel to the card. Grades **centering, corners, edges and surface**, "
-        "then combines them into an overall grade."
+        "Upload a photo of the card **front** (and optionally the **back**) on a "
+        "plain, high-contrast background with even, glare-free lighting and the "
+        "camera parallel to the card. Grades **centering, corners, edges and "
+        "surface** into an overall grade; with a back image, each factor takes the "
+        "worse of the two sides."
     )
 
-    uploaded = st.file_uploader(
-        "Card image", type=["jpg", "jpeg", "png", "bmp", "webp"], accept_multiple_files=False
-    )
+    col_f, col_b = st.columns(2)
+    front_file = col_f.file_uploader("Card FRONT", type=_TYPES, accept_multiple_files=False)
+    back_file = col_b.file_uploader("Card BACK (optional)", type=_TYPES,
+                                    accept_multiple_files=False)
 
-    if uploaded is None:
-        st.info("Upload an image to begin. See the README for imaging guidelines.")
+    if front_file is None:
+        st.info("Upload the front image to begin. See the README for imaging guidelines.")
         return
 
-    image_bgr = decode_image(uploaded.getvalue())
-    if image_bgr is None:
-        st.error("That file could not be read as an image. Try a JPG or PNG.")
+    front_bgr = decode_image(front_file.getvalue())
+    if front_bgr is None:
+        st.error("The front file could not be read as an image. Try a JPG or PNG.")
         return
 
-    render_results(image_bgr)
+    back_bgr = None
+    if back_file is not None:
+        back_bgr = decode_image(back_file.getvalue())
+        if back_bgr is None:
+            st.error("The back file could not be read as an image. Try a JPG or PNG.")
+            return
+
+    render_results(front_bgr, back_bgr)
 
 
 if __name__ == "__main__":

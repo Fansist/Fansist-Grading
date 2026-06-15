@@ -28,7 +28,7 @@ from card_detector import CardDetection, CardDetectionError, detect_card
 from centering import CenteringResult, measure_centering
 from corners import CornerResult, assess_corners
 from edges import EdgeResult, assess_edges
-from grading import CardGrade, build_full_grade
+from grading import CardGrade, build_full_grade, combine_grades
 from surface import SurfaceResult, assess_surface
 
 # ---------------------------------------------------------------------------
@@ -52,6 +52,19 @@ class PipelineResult:
     corners: CornerResult | None = None
     edges: EdgeResult | None = None
     surface: SurfaceResult | None = None
+
+
+@dataclass
+class TwoSidedResult:
+    """A card graded from its front and (optionally) back image.
+
+    ``combined`` is the card's grade: each sub-grade is the worse of the two
+    sides (see ``grading.combine_grades``). ``back`` is None for a front-only card.
+    """
+
+    front: "PipelineResult"
+    back: "PipelineResult | None"
+    combined: CardGrade
 
 
 def decode_image(data: bytes) -> np.ndarray | None:
@@ -108,6 +121,26 @@ def run_pipeline(
         edges=edge_res,
         surface=surface_res,
     )
+
+
+def grade_card(
+    front_bgr: np.ndarray,
+    back_bgr: np.ndarray | None = None,
+    assess_condition: bool = True,
+    calibration=None,
+) -> TwoSidedResult:
+    """Grade a card from its front and (optional) back image.
+
+    Runs the full pipeline on each side and combines them into one card grade
+    (worse side per factor). Raises ``CardDetectionError`` if a side can't be
+    detected.
+    """
+    front = run_pipeline(front_bgr, assess_condition, calibration)
+    back = run_pipeline(back_bgr, assess_condition, calibration) if back_bgr is not None else None
+    strategy = calibration.overall_strategy if calibration is not None else None
+    weights = calibration.overall_weights if calibration is not None else None
+    combined = combine_grades(front.grade, back.grade if back else None, strategy, weights)
+    return TwoSidedResult(front=front, back=back, combined=combined)
 
 
 # Feature names the calibration/training code learns from (raw, pre-grade).

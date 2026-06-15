@@ -333,3 +333,52 @@ def build_grade(
 ) -> CardGrade:
     """Build a centering-only :class:`CardGrade` (condition factors left as stubs)."""
     return build_full_grade(horizontal_ratio, vertical_ratio)
+
+
+def combine_grades(
+    front: CardGrade,
+    back: Optional[CardGrade],
+    overall_strategy: Optional[str] = None,
+    overall_weights: Optional[dict] = None,
+) -> CardGrade:
+    """Combine a card's front and back grades into one card grade.
+
+    A defect on *either* face counts, so each sub-grade is the **worse (lower)**
+    of the two sides; centering keeps the worse side's ratios. The overall is
+    recomputed from the combined sub-grades. With ``back=None`` the front grade
+    is returned unchanged (single-sided).
+    """
+    if back is None:
+        return front
+
+    # Centering: the worse side governs (and we keep that side's ratios).
+    if front.centering_grade <= back.centering_grade:
+        cg, cl = front.centering_grade, front.centering_label
+        ch, cv = front.centering_ratio_h, front.centering_ratio_v
+    else:
+        cg, cl = back.centering_grade, back.centering_label
+        ch, cv = back.centering_ratio_h, back.centering_ratio_v
+
+    combined = CardGrade(
+        centering_ratio_h=ch, centering_ratio_v=cv,
+        centering_grade=cg, centering_label=cl,
+    )
+
+    def worst(a: Optional[float], b: Optional[float], scale):
+        vals = [v for v in (a, b) if v is not None]
+        if not vals:
+            return None, ""
+        g = min(vals)
+        return g, label_for_grade(g, scale)
+
+    combined.corners, combined.corners_label = worst(front.corners, back.corners, CORNER_GRADE_SCALE)
+    combined.edges, combined.edges_label = worst(front.edges, back.edges, EDGE_GRADE_SCALE)
+    combined.surface, combined.surface_label = worst(front.surface, back.surface, SURFACE_GRADE_SCALE)
+
+    if overall_strategy or overall_weights:
+        combined.overall = compute_overall(combined.sub_scores(),
+                                           strategy=overall_strategy or "weighted",
+                                           weights=overall_weights)
+    else:
+        combined.overall = compute_overall(combined.sub_scores())
+    return combined

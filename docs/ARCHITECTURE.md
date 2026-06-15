@@ -64,11 +64,18 @@ calibration, the QR report service, and the hardware that feeds it.
 - **Honest about limits.** Single-image surface grading is weakest; corner/edge
   wear is colour-based; results are automated estimates, not official grades.
 
+## Two-sided grading
+
+`pipeline.grade_card(front, back)` runs the pipeline on each face and
+`grading.combine_grades` takes the **worse side per factor** (a defect on either
+face counts; centering keeps the worse side's ratios). The `GradeReport` carries
+both sides' breakdowns and images, and the web page shows front + back.
+
 ## Extending
 
-- **Back-of-card:** run the pipeline on the reverse, add fields to `GradeReport`,
-  combine front+back centering.
 - **ML defect model:** implement an alternative `assess_surface`/`assess_corners`
   behind the same return type; the rest is unchanged.
+- **Card metadata / registry:** `report.py` accepts `--name/--set/--number`;
+  `report.list_reports` backs the web index — add per-set population on top.
 - **Registry/population:** `report.list_reports` already backs the web index;
   add card metadata + per-set population on top.

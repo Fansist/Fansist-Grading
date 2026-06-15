@@ -72,7 +72,11 @@ PAGE = """<!doctype html>
       <div class="k1000">{{ r.overall_score_1000 }} / 1000</div>{% endif %}
     </div>
     <div style="color:var(--mut)">
-      Overall grade combined from the four sub-grades below.
+      {% if r.sides == 2 %}Combined from front &amp; back (worse side per factor).
+      {% else %}Overall grade combined from the four sub-grades below.{% endif %}
+      {% if r.meta.get('name') or r.meta.get('set') %}<br><b style="color:var(--ink)">
+      {{ r.meta.get('name','') }}</b> {{ r.meta.get('set','') }}
+      {{ r.meta.get('number','') }}{% endif %}
       <br>Registry population: {{ population }} graded ·
       <a href="/">browse registry</a>
     </div>
@@ -90,44 +94,66 @@ PAGE = """<!doctype html>
   </div>
 
   <h2>Centering</h2>
+  {% set csides = [('Front', r.centering_detail)] %}
+  {% if r.sides == 2 %}{% set csides = csides + [('Back', r.back_centering_detail)] %}{% endif %}
   <table>
-    <tr><th>Horizontal (L : R)</th><td>{{ pc(r.centering_detail.horizontal_pct.left) }}
-      / {{ pc(r.centering_detail.horizontal_pct.right) }}</td>
-      <th>Vertical (T : B)</th><td>{{ pc(r.centering_detail.vertical_pct.top) }}
-      / {{ pc(r.centering_detail.vertical_pct.bottom) }}</td></tr>
-    <tr><th>Margins (px)</th><td colspan="3">
-      L {{ r.centering_detail.margins_px.left }} ·
-      R {{ r.centering_detail.margins_px.right }} ·
-      T {{ r.centering_detail.margins_px.top }} ·
-      B {{ r.centering_detail.margins_px.bottom }}</td></tr>
+    <tr><th>Side</th><th>Horizontal (L : R)</th><th>Vertical (T : B)</th>
+      <th>Margins px (L / R / T / B)</th></tr>
+    {% for nm, d in csides %}
+    <tr><td>{{ nm }}</td>
+      <td>{{ pc(d.horizontal_pct.left) }} / {{ pc(d.horizontal_pct.right) }}</td>
+      <td>{{ pc(d.vertical_pct.top) }} / {{ pc(d.vertical_pct.bottom) }}</td>
+      <td>{{ d.margins_px.left }} / {{ d.margins_px.right }} /
+        {{ d.margins_px.top }} / {{ d.margins_px.bottom }}</td></tr>
+    {% endfor %}
   </table>
 
   {% if r.corners_detail %}
   <h2>Corners (per corner)</h2>
-  <table><tr>{% for k,v in r.corners_detail.items() %}
+  <table><tr><th>Side</th>{% for k,v in r.corners_detail.items() %}
     <th>{{ k.replace('_',' ').title() }}</th>{% endfor %}</tr>
-    <tr>{% for k,v in r.corners_detail.items() %}<td>{{ fmt(v) }}</td>{% endfor %}</tr></table>
+    <tr><td>{{ 'Front' if r.sides == 2 else '—' }}</td>
+      {% for k,v in r.corners_detail.items() %}<td>{{ fmt(v) }}</td>{% endfor %}</tr>
+    {% if r.sides == 2 and r.back_corners_detail %}<tr><td>Back</td>
+      {% for k,v in r.back_corners_detail.items() %}<td>{{ fmt(v) }}</td>{% endfor %}</tr>{% endif %}
+  </table>
   {% endif %}
 
   {% if r.edges_detail %}
   <h2>Edges (per edge)</h2>
-  <table><tr>{% for k,v in r.edges_detail.items() %}
+  <table><tr><th>Side</th>{% for k,v in r.edges_detail.items() %}
     <th>{{ k.title() }}</th>{% endfor %}</tr>
-    <tr>{% for k,v in r.edges_detail.items() %}<td>{{ fmt(v) }}</td>{% endfor %}</tr></table>
+    <tr><td>{{ 'Front' if r.sides == 2 else '—' }}</td>
+      {% for k,v in r.edges_detail.items() %}<td>{{ fmt(v) }}</td>{% endfor %}</tr>
+    {% if r.sides == 2 and r.back_edges_detail %}<tr><td>Back</td>
+      {% for k,v in r.back_edges_detail.items() %}<td>{{ fmt(v) }}</td>{% endfor %}</tr>{% endif %}
+  </table>
   {% endif %}
 
   {% if r.surface_detail %}
   <h2>Surface</h2>
-  <table><tr><th>Defect density</th>
-    <td>{{ r.surface_detail.defect_density_pct }}%</td></tr></table>
+  <table><tr><th>Side</th><th>Defect density</th></tr>
+    <tr><td>{{ 'Front' if r.sides == 2 else '—' }}</td>
+      <td>{{ r.surface_detail.defect_density_pct }}%</td></tr>
+    {% if r.sides == 2 and r.back_surface_detail %}<tr><td>Back</td>
+      <td>{{ r.back_surface_detail.defect_density_pct }}%</td></tr>{% endif %}
+  </table>
   {% endif %}
 
-  <h2>Imagery</h2>
+  <h2>Imagery{% if r.sides == 2 %} — front{% endif %}</h2>
   <div class="imgs">
     <figure><img src="{{ url('original') }}" alt="card"><figcaption>Detected card</figcaption></figure>
     <figure><img src="{{ url('centering') }}" alt="centering"><figcaption>Centering</figcaption></figure>
     <figure><img src="{{ url('condition') }}" alt="condition"><figcaption>Corners / edges / surface</figcaption></figure>
   </div>
+  {% if r.sides == 2 %}
+  <h2>Imagery — back</h2>
+  <div class="imgs">
+    <figure><img src="{{ url('back_original') }}" alt="back"><figcaption>Detected card</figcaption></figure>
+    <figure><img src="{{ url('back_centering') }}" alt="back centering"><figcaption>Centering</figcaption></figure>
+    <figure><img src="{{ url('back_condition') }}" alt="back condition"><figcaption>Corners / edges / surface</figcaption></figure>
+  </div>
+  {% endif %}
 
   <div class="qr">
     <img src="{{ url('qr') }}" alt="QR">
@@ -135,8 +161,8 @@ PAGE = """<!doctype html>
       <div class="cert">{{ r.report_url }}</div></div>
   </div>
 
-  <p class="disc">Automated estimate from computer-vision analysis of a single
-  image — for reference, not an official third-party grade.</p>
+  <p class="disc">Automated estimate from computer-vision analysis of the card
+  image(s) — for reference, not an official third-party grade.</p>
 </div></body></html>"""
 
 

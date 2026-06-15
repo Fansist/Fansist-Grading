@@ -43,6 +43,9 @@ DEFAULT_BASE_URL = "https://grade.fansist.app"
 IMG_ORIGINAL = "original.png"
 IMG_CENTERING = "centering.png"
 IMG_CONDITION = "condition.png"
+IMG_BACK_ORIGINAL = "back_original.png"
+IMG_BACK_CENTERING = "back_centering.png"
+IMG_BACK_CONDITION = "back_condition.png"
 IMG_QR = "qr.png"
 
 
@@ -67,14 +70,21 @@ class GradeReport:
     surface_grade: float | None
     surface_label: str
 
-    # Per-factor breakdowns ------------------------------------------------
+    # Per-factor breakdowns (front) ----------------------------------------
     centering_detail: dict           # ratios + margins (px)
     corners_detail: dict             # per-corner 1-10 grade
     edges_detail: dict               # per-edge 1-10 grade
     surface_detail: dict             # defect density
 
+    # Two-sided ------------------------------------------------------------
+    sides: int = 1                   # 1 = front only, 2 = front + back
+    back_centering_detail: dict = field(default_factory=dict)
+    back_corners_detail: dict = field(default_factory=dict)
+    back_edges_detail: dict = field(default_factory=dict)
+    back_surface_detail: dict = field(default_factory=dict)
+
     images: dict = field(default_factory=dict)   # role -> filename
-    meta: dict = field(default_factory=dict)      # optional card/population info
+    meta: dict = field(default_factory=dict)      # card info / metadata
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -92,48 +102,66 @@ def _score_1000(overall: float | None) -> int | None:
     return int(round(overall * 100))
 
 
-def build_report(
-    result: PipelineResult,
-    cert_id: str | None = None,
-    base_url: str = DEFAULT_BASE_URL,
-    graded_at: str | None = None,
-    meta: dict | None = None,
-) -> GradeReport:
-    """Assemble a :class:`GradeReport` from a pipeline result.
-
-    Per-corner / per-edge 1-10 scores are derived by running the same condition
-    grade scales over each region's individual wear score, so the breakdown is
-    internally consistent with the aggregate sub-grades.
-    """
-    cert_id = cert_id or mint_cert_id()
-    graded_at = graded_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    grade = result.grade
-
-    # Centering breakdown.
+def _centering_detail(result: PipelineResult) -> dict:
     c = result.centering
-    centering_detail = {
+    return {
         "horizontal_pct": {"left": c.horizontal_ratio[0], "right": c.horizontal_ratio[1]},
         "vertical_pct": {"top": c.vertical_ratio[0], "bottom": c.vertical_ratio[1]},
         "margins_px": {"left": c.left, "right": c.right, "top": c.top, "bottom": c.bottom},
         "method": c.method,
     }
 
-    # Per-corner / per-edge 1-10 grades from their individual wear.
-    corners_detail = {}
-    if result.corners is not None:
-        corners_detail = {
-            name: grade_corners(w)[0] for name, w in result.corners.per_corner.items()
-        }
-    edges_detail = {}
-    if result.edges is not None:
-        edges_detail = {
-            name: grade_edges(w)[0] for name, w in result.edges.per_edge.items()
-        }
-    surface_detail = {}
-    if result.surface is not None:
-        surface_detail = {
-            "defect_density_pct": round(result.surface.defect_fraction * 100.0, 3)
-        }
+
+def _corners_detail(result: PipelineResult) -> dict:
+    if result.corners is None:
+        return {}
+    return {name: grade_corners(w)[0] for name, w in result.corners.per_corner.items()}
+
+
+def _edges_detail(result: PipelineResult) -> dict:
+    if result.edges is None:
+        return {}
+    return {name: grade_edges(w)[0] for name, w in result.edges.per_edge.items()}
+
+
+def _surface_detail(result: PipelineResult) -> dict:
+    if result.surface is None:
+        return {}
+    return {"defect_density_pct": round(result.surface.defect_fraction * 100.0, 3)}
+
+
+def build_report(
+    result: PipelineResult,
+    cert_id: str | None = None,
+    base_url: str = DEFAULT_BASE_URL,
+    graded_at: str | None = None,
+    meta: dict | None = None,
+    back: PipelineResult | None = None,
+    combined=None,
+) -> GradeReport:
+    """Assemble a :class:`GradeReport` from a pipeline result.
+
+    Per-corner / per-edge 1-10 scores are derived by running the same condition
+    grade scales over each region's individual wear score, so the breakdown is
+    internally consistent with the aggregate sub-grades. When ``back`` is given,
+    the headline grade is ``combined`` (worse-of-both-sides) and the report also
+    carries the back-side breakdown and images.
+    """
+    cert_id = cert_id or mint_cert_id()
+    graded_at = graded_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    grade = combined if (back is not None and combined is not None) else result.grade
+
+    images = {"original": IMG_ORIGINAL, "centering": IMG_CENTERING,
+              "condition": IMG_CONDITION, "qr": IMG_QR}
+    back_centering = back_corners = back_edges = back_surface = {}
+    if back is not None:
+        back_centering = _centering_detail(back)
+        back_corners = _corners_detail(back)
+        back_edges = _edges_detail(back)
+        back_surface = _surface_detail(back)
+        images.update({"back_original": IMG_BACK_ORIGINAL,
+                       "back_centering": IMG_BACK_CENTERING,
+                       "back_condition": IMG_BACK_CONDITION})
 
     return GradeReport(
         cert_id=cert_id,
@@ -149,12 +177,16 @@ def build_report(
         edges_label=grade.edges_label,
         surface_grade=grade.surface,
         surface_label=grade.surface_label,
-        centering_detail=centering_detail,
-        corners_detail=corners_detail,
-        edges_detail=edges_detail,
-        surface_detail=surface_detail,
-        images={"original": IMG_ORIGINAL, "centering": IMG_CENTERING,
-                "condition": IMG_CONDITION, "qr": IMG_QR},
+        centering_detail=_centering_detail(result),
+        corners_detail=_corners_detail(result),
+        edges_detail=_edges_detail(result),
+        surface_detail=_surface_detail(result),
+        sides=2 if back is not None else 1,
+        back_centering_detail=back_centering,
+        back_corners_detail=back_corners,
+        back_edges_detail=back_edges,
+        back_surface_detail=back_surface,
+        images=images,
         meta=meta or {},
     )
 
@@ -178,22 +210,35 @@ def make_qr_png_bytes(url: str) -> bytes:
     return buf.getvalue()
 
 
-def save_report(report: GradeReport, result: PipelineResult, store_dir: str) -> str:
-    """Persist the report JSON, annotated images and QR PNG under the cert folder.
-
-    Returns the path to the written cert folder.
-    """
+def _write_side_images(cert_dir: str, result: PipelineResult, names: tuple[str, str, str]):
     import cv2
 
+    det = result.detection
+    cv2.imwrite(os.path.join(cert_dir, names[0]), annotate_original(det))
+    cv2.imwrite(os.path.join(cert_dir, names[1]),
+                annotate_rectified(det.rectified, result.centering))
+    cv2.imwrite(os.path.join(cert_dir, names[2]),
+                annotate_condition(det.rectified, result.corners, result.edges, result.surface))
+
+
+def save_report(
+    report: GradeReport,
+    result: PipelineResult,
+    store_dir: str,
+    back_result: PipelineResult | None = None,
+) -> str:
+    """Persist the report JSON, annotated images and QR PNG under the cert folder.
+
+    Writes back-side images too when ``back_result`` is given. Returns the cert
+    folder path.
+    """
     cert_dir = os.path.join(store_dir, report.cert_id)
     os.makedirs(cert_dir, exist_ok=True)
 
-    det = result.detection
-    cv2.imwrite(os.path.join(cert_dir, IMG_ORIGINAL), annotate_original(det))
-    cv2.imwrite(os.path.join(cert_dir, IMG_CENTERING),
-                annotate_rectified(det.rectified, result.centering))
-    cv2.imwrite(os.path.join(cert_dir, IMG_CONDITION),
-                annotate_condition(det.rectified, result.corners, result.edges, result.surface))
+    _write_side_images(cert_dir, result, (IMG_ORIGINAL, IMG_CENTERING, IMG_CONDITION))
+    if back_result is not None:
+        _write_side_images(cert_dir, back_result,
+                           (IMG_BACK_ORIGINAL, IMG_BACK_CENTERING, IMG_BACK_CONDITION))
 
     with open(os.path.join(cert_dir, IMG_QR), "wb") as fh:
         fh.write(make_qr_png_bytes(report.report_url))
@@ -242,6 +287,29 @@ def population(store_dir: str) -> int:
     return len(list_reports(store_dir))
 
 
+def grade_card_to_report(
+    front_bgr,
+    back_bgr=None,
+    store_dir: str = "./cards",
+    base_url: str = DEFAULT_BASE_URL,
+    cert_id: str | None = None,
+    meta: dict | None = None,
+    calibration=None,
+) -> GradeReport:
+    """Grade a card (front + optional back), mint a cert, persist report + QR.
+
+    ``calibration`` applies a learned grade mapping if supplied. With ``back_bgr``
+    the headline grade is the worse-of-both-sides combination.
+    """
+    from pipeline import grade_card
+
+    ts = grade_card(front_bgr, back_bgr, calibration=calibration)
+    report = build_report(ts.front, cert_id=cert_id, base_url=base_url, meta=meta,
+                          back=ts.back, combined=ts.combined)
+    save_report(report, ts.front, store_dir, back_result=ts.back)
+    return report
+
+
 def grade_image_to_report(
     image_bgr,
     store_dir: str,
@@ -250,17 +318,8 @@ def grade_image_to_report(
     meta: dict | None = None,
     calibration=None,
 ) -> GradeReport:
-    """Run the pipeline on an image, mint a cert, persist the report + QR.
-
-    ``calibration`` (a ``calibration.Calibration``) applies a learned grade
-    mapping if supplied.
-    """
-    from pipeline import run_pipeline
-
-    result = run_pipeline(image_bgr, calibration=calibration)
-    report = build_report(result, cert_id=cert_id, base_url=base_url, meta=meta)
-    save_report(report, result, store_dir)
-    return report
+    """Front-only convenience wrapper around :func:`grade_card_to_report`."""
+    return grade_card_to_report(image_bgr, None, store_dir, base_url, cert_id, meta, calibration)
 
 
 def _cli(argv: list[str] | None = None) -> int:
@@ -271,25 +330,39 @@ def _cli(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Grade a card image, mint a cert, and write its QR report."
     )
-    parser.add_argument("image", help="Path to a card photo.")
+    parser.add_argument("image", help="Path to the card FRONT photo.")
+    parser.add_argument("--back", help="Path to the card BACK photo (optional).")
     parser.add_argument("--store", default="./cards", help="Report store directory.")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL,
                         help="Public base URL the QR points at.")
     parser.add_argument("--calibration", default=os.environ.get("FANSIST_CALIBRATION"),
                         help="Path to a trained calibration.json (or set "
                              "FANSIST_CALIBRATION).")
+    parser.add_argument("--name", help="Card name (metadata).")
+    parser.add_argument("--set", dest="card_set", help="Card set (metadata).")
+    parser.add_argument("--number", help="Card number (metadata).")
     args = parser.parse_args(argv)
 
     from calibration import load_optional
     calibration = load_optional(args.calibration)
 
-    image = cv2.imread(args.image, cv2.IMREAD_COLOR)
-    if image is None:
+    front = cv2.imread(args.image, cv2.IMREAD_COLOR)
+    if front is None:
         print(f"error: could not read image {args.image!r}")
         return 2
+    back = None
+    if args.back:
+        back = cv2.imread(args.back, cv2.IMREAD_COLOR)
+        if back is None:
+            print(f"error: could not read back image {args.back!r}")
+            return 2
+
+    meta = {k: v for k, v in (("name", args.name), ("set", args.card_set),
+                              ("number", args.number)) if v}
     try:
-        report = grade_image_to_report(image, args.store, base_url=args.base_url,
-                                       calibration=calibration)
+        report = grade_card_to_report(front, back, store_dir=args.store,
+                                      base_url=args.base_url, meta=meta,
+                                      calibration=calibration)
     except Exception as exc:  # detection or processing failure
         print(json.dumps({"error": str(exc)}))
         return 1
@@ -297,6 +370,7 @@ def _cli(argv: list[str] | None = None) -> int:
     print(json.dumps({
         "cert_id": report.cert_id,
         "report_url": report.report_url,
+        "sides": report.sides,
         "overall_grade": report.overall_grade,
         "overall_score_1000": report.overall_score_1000,
         "calibrated": calibration is not None,

@@ -4,15 +4,39 @@ import cv2
 import numpy as np
 import pytest
 
+import cv2
+
 from card_detector import CardDetectionError
 from pipeline import (
     annotate_condition,
     annotate_original,
     annotate_rectified,
     decode_image,
+    grade_card,
     run_pipeline,
 )
-from conftest import make_scene
+from conftest import make_card, make_scene, make_scene_from_card
+
+
+def _damaged_back_scene():
+    card = make_card()
+    cv2.rectangle(card, (2, 2), (48, 48), (90, 90, 90), -1)   # scuffed corner
+    return make_scene_from_card(card)
+
+
+def test_grade_card_front_only_returns_front_grade():
+    ts = grade_card(make_scene())
+    assert ts.back is None
+    assert ts.combined == ts.front.grade
+
+
+def test_grade_card_two_sided_takes_worse_per_factor():
+    ts = grade_card(make_scene(), _damaged_back_scene())
+    assert ts.back is not None
+    # Front corners are pristine; the damaged back drags the combined down.
+    assert ts.front.grade.corners == 10.0
+    assert ts.back.grade.corners < 10.0
+    assert ts.combined.corners == min(ts.front.grade.corners, ts.back.grade.corners)
 
 
 def test_run_pipeline_grades_all_four_factors():

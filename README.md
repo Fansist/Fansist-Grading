@@ -107,12 +107,16 @@ per-edge (×4) breakdown, centering measurements, surface defect density, and th
 annotated images.
 
 ```bash
-# Grade an image -> mint a cert, write report JSON + QR + images into ./cards/
-python report.py path/to/card.jpg --store ./cards --base-url https://grade.example
+# Grade a card (front, optional back, optional metadata) -> cert + QR + report
+python report.py front.jpg --back back.jpg --name "Charizard" --set "Base Set" \
+    --store ./cards --base-url https://grade.example
 
 # Serve the report page (scanning the slab's QR opens /card/<cert_id>)
 FANSIST_STORE=./cards python web_report.py        # http://localhost:8000
 ```
+
+With a `--back` image each factor takes the **worse of the two sides** (back
+centering matters in real grading); the report page shows both sides.
 
 `report.py` builds the stats record + QR; `web_report.py` is a small Flask app
 serving `/card/<cert_id>` plus a registry index at `/` with a population count.
@@ -331,5 +335,6 @@ Both call this repo's pipeline as a library.
 - Single, evenly-lit photo: see [Accuracy & honesty](#accuracy--honesty) — surface
   is the weakest factor; corner/edge wear is colour-based.
 - Classic CV detection: sensitive to lighting/background as described above.
-- Assumes one card (front), photographed roughly flat and filling the frame.
+- One card per grade (front, and optionally back), photographed roughly flat and
+  filling the frame.
 - The grade is an automated estimate for triage/fun, **not** an official grade.

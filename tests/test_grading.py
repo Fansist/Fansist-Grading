@@ -6,6 +6,7 @@ from grading import (
     CardGrade,
     build_full_grade,
     build_grade,
+    combine_grades,
     compute_overall,
     grade_centering,
     grade_corners,
@@ -122,6 +123,23 @@ def test_build_full_grade_worse_corner_drags_overall():
                             corner_wear=0.6, edge_wear=0.0, surface_wear=0.0)
     assert worn.corners < pristine.corners
     assert worn.overall < pristine.overall
+
+
+def test_combine_grades_takes_worse_side():
+    front = build_full_grade((50.0, 50.0), (50.0, 50.0),
+                             corner_wear=0.0, edge_wear=0.0, surface_wear=0.0)
+    back = build_full_grade((68.0, 32.0), (50.0, 50.0),     # worse centering
+                            corner_wear=0.5, edge_wear=0.0, surface_wear=0.0)
+    combined = combine_grades(front, back)
+    assert combined.centering_grade == min(front.centering_grade, back.centering_grade)
+    assert combined.corners == min(front.corners, back.corners)
+    assert combined.edges == 10.0           # both sides pristine
+    assert combined.overall <= front.overall
+
+
+def test_combine_grades_none_back_returns_front():
+    front = build_grade((50.0, 50.0), (50.0, 50.0))
+    assert combine_grades(front, None) is front
 
 
 def test_to_dict_has_expected_keys():

@@ -137,3 +137,39 @@ def test_web_index_shows_registry(tmp_path):
     body = resp.get_data(as_text=True)
     assert cert_id in body
     assert "Population" in body
+
+
+def test_two_sided_report_persists_and_renders(tmp_path):
+    import cv2
+    from grading import combine_grades
+    from conftest import make_card, make_scene_from_card
+
+    front = run_pipeline(make_scene())
+    back_card = make_card()
+    cv2.rectangle(back_card, (2, 2), (48, 48), (90, 90, 90), -1)
+    back = run_pipeline(make_scene_from_card(back_card))
+    combined = combine_grades(front.grade, back.grade)
+
+    report = build_report(front, base_url="https://example.test", back=back, combined=combined)
+    assert report.sides == 2
+    assert report.back_centering_detail and report.back_corners_detail
+
+    save_report(report, front, str(tmp_path), back_result=back)
+    cert_dir = tmp_path / report.cert_id
+    for name in ("back_original.png", "back_centering.png", "back_condition.png"):
+        assert (cert_dir / name).exists()
+
+    client = create_app(str(tmp_path)).test_client()
+    body = client.get(f"/card/{report.cert_id}").get_data(as_text=True)
+    assert "Back" in body
+    assert client.get(f"/card/{report.cert_id}/img/back_original.png").status_code == 200
+
+
+def test_report_metadata_is_shown(tmp_path):
+    result = _result()
+    report = build_report(result, base_url="https://example.test",
+                          meta={"name": "Charizard", "set": "Base Set"})
+    save_report(report, result, str(tmp_path))
+    body = create_app(str(tmp_path)).test_client().get(
+        f"/card/{report.cert_id}").get_data(as_text=True)
+    assert "Charizard" in body and "Base Set" in body

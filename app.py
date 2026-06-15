@@ -64,9 +64,11 @@ def _render_side(label: str | None, result) -> None:
 def render_results(front_bgr: np.ndarray, back_bgr: np.ndarray | None = None) -> None:
     """Grade the card (front + optional back) and render all outputs."""
     from calibration import load_optional
+    from pipeline import load_ml_optional
     calibration = load_optional(os.environ.get("FANSIST_CALIBRATION"))
+    ml_model = load_ml_optional(os.environ.get("FANSIST_ML_MODEL"))
     try:
-        ts = grade_card(front_bgr, back_bgr, calibration=calibration)
+        ts = grade_card(front_bgr, back_bgr, calibration=calibration, ml_model=ml_model)
     except CardDetectionError as exc:
         st.error(
             "Could not detect the card.\n\n"
@@ -86,6 +88,8 @@ def render_results(front_bgr: np.ndarray, back_bgr: np.ndarray | None = None) ->
         st.subheader(f"Overall grade: {grade.overall:g}")
     if back is not None:
         st.caption("Graded from **front + back** (worse side per factor).")
+    if ml_model is not None:
+        st.caption("🧠 Condition graded by the trained CNN (FANSIST_ML_MODEL).")
     if calibration is not None:
         st.caption("⚙️ Calibrated to your graded-card dataset (FANSIST_CALIBRATION).")
 

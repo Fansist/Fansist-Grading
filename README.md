@@ -172,11 +172,39 @@ More labelled cards → better accuracy; validate on a held-out set. The same
 feature interface (`pipeline.extract_features`) is where a heavier ML model
 (e.g. a CNN over the card crop) would later plug in.
 
+### Deep-learning grader (the AI — TAG-style)
+
+The classical heuristics (corners/edges/surface) are interpretable but limited.
+For a **TAG-style ML grader**, there's an optional CNN (`ml_grader.py`,
+`train_ml.py`) — a transfer-learning MobileNetV3 that predicts the condition
+factors directly from the image and is **trained on labelled cards** (it learns
+"what a 10 vs a 9 looks like"). It supports **multi-angle / photometric** input
+(`extra_frames=`) — the raking-light captures that let surface/corner defects
+actually be seen.
+
+```bash
+pip install -r requirements-ml.txt          # torch + torchvision (heavy, optional)
+python train_ml.py --manifest data/labels.csv --images-root graded \
+    --out model.pth --epochs 40 --freeze --val-split 0.2
+FANSIST_ML_MODEL=model.pth python report.py card.jpg --store ./cards
+```
+
+When `FANSIST_ML_MODEL` is set, the CNN grades corners/edges/surface (centering
+stays the geometric measurement); the app, CLI and report all use it.
+
+> **Reaching TAG-level accuracy is a data + capture problem, not a code one.**
+> TAG's accuracy comes from (1) **photometric-stereo capture** (multi-angle
+> controlled light — the surface signal does **not** exist in a single flat
+> photo) and (2) a **large** labelled set of RAW-card images with grades
+> (thousands). This module is the trainable architecture for exactly that; a
+> handful of reference cards will overfit (watch the **val** MAE, not train).
+> Graded *slabbed* photos are also a different imaging domain than raw cards.
+
 ### Testing
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
+pytest                        # torch tests auto-skip if torch isn't installed
 ```
 
 The suite uses **synthetic cards with known margins/defects** (`tests/conftest.py`)
@@ -256,6 +284,8 @@ condition_utils.py     Shared border-reference / anomaly helpers for corners+edg
 grading.py             Map each factor to a sub-grade; combine into overall; CardGrade.
 calibration.py         Learn the grade mapping from graded cards (isotonic fit).
 train.py               CLI: train a calibration from a CSV of graded cards.
+ml_grader.py           Optional CNN condition grader (transfer learning, torch).
+train_ml.py            CLI: train the CNN on labelled card images.
 pipeline.py            Headless detect -> 4 factors -> grade + decode + annotate + CLI.
 report.py              Cert id + QR + TAG-style stats record; persistence + CLI.
 web_report.py          Flask page (/card/<cert_id>) + registry index the QR opens.

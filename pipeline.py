@@ -28,7 +28,7 @@ from card_detector import CardDetection, CardDetectionError, detect_card
 from centering import CenteringResult, measure_centering
 from corners import CornerResult, assess_corners
 from edges import EdgeResult, assess_edges
-from grading import CardGrade, build_full_grade, combine_grades
+from grading import CardGrade, build_full_grade, build_grade_direct, combine_grades
 from surface import SurfaceResult, assess_surface
 
 # ---------------------------------------------------------------------------
@@ -77,6 +77,8 @@ def run_pipeline(
     image_bgr: np.ndarray,
     assess_condition: bool = True,
     calibration=None,
+    ml_model=None,
+    extra_frames=None,
 ) -> PipelineResult:
     """Run the full grade (detect -> centering + corners/edges/surface -> grade).
 
@@ -87,6 +89,12 @@ def run_pipeline(
         calibration: Optional ``calibration.Calibration`` learned from graded
             cards; when given, its data-fit curves/weights replace the static
             grade scales (see calibration.py / train.py).
+        ml_model: Optional ``ml_grader.MLGrader`` (trained CNN). When given, the
+            corner/edge/surface grades come from the model instead of the
+            classical heuristics; centering stays measured/calibrated.
+        extra_frames: Optional list of additional BGR captures of the SAME card
+            under different lighting (the photometric/raking-light set) fed to
+            the ML model to reveal fine surface/corner defects.
 
     Raises:
         CardDetectionError: If the card cannot be located (callers should catch
@@ -97,22 +105,30 @@ def run_pipeline(
     centering = measure_centering(rectified)
 
     corner_res = edge_res = surface_res = None
-    corner_wear = edge_wear = surface_wear = None
     if assess_condition:
         inner = centering.inner_rect
         corner_res = assess_corners(rectified, inner_rect=inner)
         edge_res = assess_edges(rectified, inner_rect=inner)
         surface_res = assess_surface(rectified, inner_rect=inner)
-        corner_wear, edge_wear, surface_wear = corner_res.wear, edge_res.wear, surface_res.wear
 
-    grade = build_full_grade(
-        centering.horizontal_ratio,
-        centering.vertical_ratio,
-        corner_wear=corner_wear,
-        edge_wear=edge_wear,
-        surface_wear=surface_wear,
-        calibration=calibration,
-    )
+    if ml_model is not None:
+        # AI grades the condition factors; assessors above remain for the overlay.
+        ml = ml_model.grade(rectified, extra_frames=extra_frames)
+        grade = build_grade_direct(
+            centering.horizontal_ratio, centering.vertical_ratio,
+            corners=ml.get("corners"), edges=ml.get("edges"), surface=ml.get("surface"),
+            calibration=calibration,
+        )
+    elif assess_condition:
+        grade = build_full_grade(
+            centering.horizontal_ratio, centering.vertical_ratio,
+            corner_wear=corner_res.wear, edge_wear=edge_res.wear,
+            surface_wear=surface_res.wear, calibration=calibration,
+        )
+    else:
+        grade = build_full_grade(centering.horizontal_ratio, centering.vertical_ratio,
+                                 calibration=calibration)
+
     return PipelineResult(
         detection=detection,
         centering=centering,
@@ -123,11 +139,24 @@ def run_pipeline(
     )
 
 
+def load_ml_optional(path):
+    """Load an ml_grader.MLGrader if ``path`` is set/exists and torch is present."""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        from ml_grader import MLGrader
+        return MLGrader(path)
+    except Exception as exc:  # torch missing / bad checkpoint -> fall back silently
+        print(f"(ML model not loaded: {exc})", file=sys.stderr)
+        return None
+
+
 def grade_card(
     front_bgr: np.ndarray,
     back_bgr: np.ndarray | None = None,
     assess_condition: bool = True,
     calibration=None,
+    ml_model=None,
 ) -> TwoSidedResult:
     """Grade a card from its front and (optional) back image.
 
@@ -135,8 +164,9 @@ def grade_card(
     (worse side per factor). Raises ``CardDetectionError`` if a side can't be
     detected.
     """
-    front = run_pipeline(front_bgr, assess_condition, calibration)
-    back = run_pipeline(back_bgr, assess_condition, calibration) if back_bgr is not None else None
+    front = run_pipeline(front_bgr, assess_condition, calibration, ml_model=ml_model)
+    back = (run_pipeline(back_bgr, assess_condition, calibration, ml_model=ml_model)
+            if back_bgr is not None else None)
     strategy = calibration.overall_strategy if calibration is not None else None
     weights = calibration.overall_weights if calibration is not None else None
     combined = combine_grades(front.grade, back.grade if back else None, strategy, weights)

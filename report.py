@@ -295,15 +295,17 @@ def grade_card_to_report(
     cert_id: str | None = None,
     meta: dict | None = None,
     calibration=None,
+    ml_model=None,
 ) -> GradeReport:
     """Grade a card (front + optional back), mint a cert, persist report + QR.
 
-    ``calibration`` applies a learned grade mapping if supplied. With ``back_bgr``
-    the headline grade is the worse-of-both-sides combination.
+    ``calibration`` applies a learned grade mapping; ``ml_model`` (a trained CNN)
+    grades the condition factors. With ``back_bgr`` the headline grade is the
+    worse-of-both-sides combination.
     """
     from pipeline import grade_card
 
-    ts = grade_card(front_bgr, back_bgr, calibration=calibration)
+    ts = grade_card(front_bgr, back_bgr, calibration=calibration, ml_model=ml_model)
     report = build_report(ts.front, cert_id=cert_id, base_url=base_url, meta=meta,
                           back=ts.back, combined=ts.combined)
     save_report(report, ts.front, store_dir, back_result=ts.back)
@@ -344,7 +346,9 @@ def _cli(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from calibration import load_optional
+    from pipeline import load_ml_optional
     calibration = load_optional(args.calibration)
+    ml_model = load_ml_optional(os.environ.get("FANSIST_ML_MODEL"))
 
     front = cv2.imread(args.image, cv2.IMREAD_COLOR)
     if front is None:
@@ -362,7 +366,7 @@ def _cli(argv: list[str] | None = None) -> int:
     try:
         report = grade_card_to_report(front, back, store_dir=args.store,
                                       base_url=args.base_url, meta=meta,
-                                      calibration=calibration)
+                                      calibration=calibration, ml_model=ml_model)
     except Exception as exc:  # detection or processing failure
         print(json.dumps({"error": str(exc)}))
         return 1
@@ -374,6 +378,7 @@ def _cli(argv: list[str] | None = None) -> int:
         "overall_grade": report.overall_grade,
         "overall_score_1000": report.overall_score_1000,
         "calibrated": calibration is not None,
+        "ml_model": ml_model is not None,
         "stored": os.path.join(os.path.abspath(args.store), report.cert_id),
     }, indent=2))
     return 0

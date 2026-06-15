@@ -71,10 +71,23 @@ calibration, the QR report service, and the hardware that feeds it.
 face counts; centering keeps the worse side's ratios). The `GradeReport` carries
 both sides' breakdowns and images, and the web page shows front + back.
 
+## ML grader (the AI)
+
+`ml_grader.py` is a transfer-learning CNN (MobileNetV3) that predicts the
+condition factors directly from the image, trained by `train_ml.py` on labelled
+cards. When `FANSIST_ML_MODEL` is set, `run_pipeline(..., ml_model=...)` uses it
+for corners/edges/surface (centering stays the geometric measurement) via
+`grading.build_grade_direct`. It accepts `extra_frames` (multi-angle/photometric
+captures) — the signal that makes surface/corner grading real.
+
+The two learnable layers compose: **calibration** (light, framework-free, fits
+the feature→grade mapping) and the **CNN** (heavy, learns features from pixels).
+Reaching TAG-level accuracy needs controlled multi-angle capture (hardware) and a
+large labelled RAW-card dataset — this is the architecture for it, not a
+shortcut around the data/capture.
+
 ## Extending
 
-- **ML defect model:** implement an alternative `assess_surface`/`assess_corners`
-  behind the same return type; the rest is unchanged.
 - **Card metadata / registry:** `report.py` accepts `--name/--set/--number`;
   `report.list_reports` backs the web index — add per-set population on top.
 - **Registry/population:** `report.list_reports` already backs the web index;

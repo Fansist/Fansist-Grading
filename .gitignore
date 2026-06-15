@@ -23,6 +23,9 @@ env/
 cards/
 # Trained calibration output (user artifact)
 calibration.json
+# Trained CNN checkpoints (user artifact; large)
+*.pth
+*.pt
 
 # OS / editor cruft
 .DS_Store

@@ -335,6 +335,51 @@ def build_grade(
     return build_full_grade(horizontal_ratio, vertical_ratio)
 
 
+def build_grade_direct(
+    horizontal_ratio: tuple[float, float],
+    vertical_ratio: tuple[float, float],
+    corners: Optional[float] = None,
+    edges: Optional[float] = None,
+    surface: Optional[float] = None,
+    calibration=None,
+) -> CardGrade:
+    """Assemble a :class:`CardGrade` from DIRECT condition sub-grades (1-10).
+
+    Used by the ML grader, which predicts corner/edge/surface grades directly
+    (rather than a wear score the scale maps). Centering is still measured/
+    calibrated (it's geometric and reliable). Labels come from the nearest scale
+    tier; the overall honours a calibration's strategy/weights.
+    """
+    if calibration is not None and calibration.centering is not None:
+        worse = worse_centering_percent(horizontal_ratio, vertical_ratio)
+        centering_grade = calibration.centering.grade(worse)
+        centering_label = label_for_grade(centering_grade, CENTERING_GRADE_SCALE)
+    else:
+        centering_grade, centering_label = grade_centering(horizontal_ratio, vertical_ratio)
+
+    grade = CardGrade(
+        centering_ratio_h=horizontal_ratio,
+        centering_ratio_v=vertical_ratio,
+        centering_grade=centering_grade,
+        centering_label=centering_label,
+    )
+    if corners is not None:
+        grade.corners, grade.corners_label = corners, label_for_grade(corners, CORNER_GRADE_SCALE)
+    if edges is not None:
+        grade.edges, grade.edges_label = edges, label_for_grade(edges, EDGE_GRADE_SCALE)
+    if surface is not None:
+        grade.surface, grade.surface_label = surface, label_for_grade(surface, SURFACE_GRADE_SCALE)
+
+    cal_strategy = calibration.overall_strategy if calibration is not None else None
+    cal_weights = calibration.overall_weights if calibration is not None else None
+    if cal_strategy or cal_weights:
+        grade.overall = compute_overall(grade.sub_scores(),
+                                        strategy=cal_strategy or "weighted", weights=cal_weights)
+    else:
+        grade.overall = compute_overall(grade.sub_scores())
+    return grade
+
+
 def combine_grades(
     front: CardGrade,
     back: Optional[CardGrade],

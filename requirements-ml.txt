@@ -1,0 +1,5 @@
+# Optional ML grader (ml_grader.py / train_ml.py). Heavy; only needed to train
+# or run the CNN condition grader. The classic pipeline works without it.
+-r requirements.txt
+torch>=2.1
+torchvision>=0.16

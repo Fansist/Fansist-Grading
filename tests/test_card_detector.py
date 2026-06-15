@@ -1,5 +1,6 @@
 """Tests for card_detector.py: corner ordering, warp, detection + failures."""
 
+import cv2
 import numpy as np
 import pytest
 
@@ -9,7 +10,18 @@ from card_detector import (
     four_point_transform,
     order_points,
 )
-from conftest import CARD_H, CARD_W, make_scene
+from conftest import CARD_H, CARD_W, make_card, make_scene, make_scene_from_card
+
+
+def test_detect_card_ignores_dark_prop_below():
+    # A card with a black 'display stand' blob below it (like a real photo) must
+    # still rectify to ~card size, not stretch to include the prop.
+    scene = make_scene_from_card(make_card(), rotate_deg=0.0)
+    h, w = scene.shape[:2]
+    cv2.rectangle(scene, (w // 2 - 60, 740), (w // 2 + 60, 870), (8, 8, 8), -1)
+    det = detect_card(scene)
+    assert abs(det.rectified.shape[1] - CARD_W) <= 14
+    assert abs(det.rectified.shape[0] - CARD_H) <= 14
 
 
 def test_order_points_orders_tl_tr_br_bl():

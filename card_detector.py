@@ -69,6 +69,38 @@ APPROX_EPSILON_FRAC: float = 0.02
 # border detail; lower it if processing feels slow.
 MAX_PROCESS_DIM: int = 2000
 
+# ---------------------------------------------------------------------------
+# Segmentation detector (PRIMARY) -- robust for a card on a plain background.
+#
+# A card on a high-contrast plain background is best found by *segmenting*
+# foreground from background (the card differs from the backdrop colour), then
+# fitting the best card-shaped rectangle -- far more robust on real photos than
+# edge tracing, which fragments on busy/holo artwork and rounded corners.
+# ---------------------------------------------------------------------------
+
+# Standard trading-card aspect ratio (long / short side), 3.5 / 2.5 in.
+CARD_ASPECT_RATIO: float = 88.9 / 63.5  # ~1.40
+
+# Accept a detected blob as the card only if its rectangle's aspect ratio is
+# within this of the ideal -- this is what tells the card apart from clutter
+# (shadows, a display stand) and from random-noise blobs.
+ASPECT_TOLERANCE: float = 0.35
+
+# ...and only if the blob fills its own minimum-area rectangle at least this
+# much (a real card is solidly rectangular; noise/irregular blobs aren't).
+MIN_RECT_FILL: float = 0.72
+
+# Drop near-black foreground pixels (max channel <= this) before fitting, so a
+# black display stand / dark prop can't merge with the card. Set 0 to disable
+# (e.g. if grading genuinely black-bordered cards).
+NEAR_BLACK_MAX: int = 55
+
+# Ignore connected components smaller than this fraction of the image.
+SEG_MIN_COMPONENT_FRAC: float = 0.05
+
+# Fraction of the image border sampled to estimate the background colour.
+BG_SAMPLE_BORDER_FRAC: float = 0.01
+
 
 class CardDetectionError(Exception):
     """Raised when no card-like quadrilateral can be found in the image.
@@ -213,8 +245,92 @@ def _find_card_contour(edges: np.ndarray, image_area: float) -> np.ndarray:
     )
 
 
+def _foreground_mask(source: np.ndarray) -> np.ndarray:
+    """Binary mask of the card-ish foreground vs the plain background.
+
+    Estimates the background colour from the image border, marks pixels that
+    differ from it (Otsu on the colour-distance map), drops near-black clutter,
+    and cleans up with morphology.
+    """
+    h, w = source.shape[:2]
+    band = max(8, int(min(h, w) * BG_SAMPLE_BORDER_FRAC))
+    border = np.concatenate([
+        source[:band].reshape(-1, 3), source[-band:].reshape(-1, 3),
+        source[:, :band].reshape(-1, 3), source[:, -band:].reshape(-1, 3),
+    ])
+    bg = np.median(border, axis=0)
+
+    dist = np.sqrt(((source.astype(np.float32) - bg) ** 2).sum(axis=2))
+    dist = cv2.normalize(dist, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    _, mask = cv2.threshold(cv2.GaussianBlur(dist, (5, 5), 0), 0, 255,
+                            cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    if NEAR_BLACK_MAX > 0:
+        not_black = (source.max(axis=2) > NEAR_BLACK_MAX).astype(np.uint8) * 255
+        mask = cv2.bitwise_and(mask, not_black)
+
+    close_k = max(9, int(min(h, w) * 0.012) | 1)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
+                            np.ones((close_k, close_k), np.uint8), iterations=3)
+    return mask
+
+
+def _rect_metrics(box: np.ndarray) -> tuple[float, float]:
+    """(short_side, long_side) lengths of a 4-point rotated rectangle."""
+    sides = [np.linalg.norm(box[i] - box[(i + 1) % 4]) for i in range(4)]
+    short = float(np.mean(sorted(sides)[:2]))
+    long = float(np.mean(sorted(sides)[2:]))
+    return short, long
+
+
+def _detect_by_segmentation(source: np.ndarray) -> np.ndarray | None:
+    """Find the card by segmentation; return 4 corner points, or None.
+
+    Picks the connected component whose best-fit rectangle is most card-shaped
+    (aspect ~1.40, solidly rectangular, sensible size). Returns None if nothing
+    qualifies, so the caller can fall back to edge-based detection.
+    """
+    h, w = source.shape[:2]
+    image_area = float(h * w)
+    mask = _foreground_mask(source)
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+
+    best_box, best_score = None, None
+    for i in range(1, count):
+        if stats[i, cv2.CC_STAT_AREA] < SEG_MIN_COMPONENT_FRAC * image_area:
+            continue
+        comp = (labels == i).astype(np.uint8) * 255
+        contours, _ = cv2.findContours(comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contour = max(contours, key=cv2.contourArea)
+
+        box = cv2.boxPoints(cv2.minAreaRect(contour)).astype("float32")
+        short, long = _rect_metrics(box)
+        if short < 2:
+            continue
+        aspect = long / short
+        rect_fill = cv2.contourArea(contour) / (short * long + 1e-6)
+        frac = cv2.contourArea(contour) / image_area
+
+        if abs(aspect - CARD_ASPECT_RATIO) > ASPECT_TOLERANCE:
+            continue
+        if rect_fill < MIN_RECT_FILL:
+            continue
+        if not (MIN_CARD_AREA_FRAC <= frac <= MAX_CARD_AREA_FRAC):
+            continue
+
+        score = abs(aspect - CARD_ASPECT_RATIO)
+        if best_score is None or score < best_score:
+            best_box, best_score = box, score
+
+    return best_box
+
+
 def detect_card(image: np.ndarray) -> CardDetection:
     """Detect the card in ``image`` and return a rectified top-down crop.
+
+    Tries segmentation first (robust for a card on a plain background), then
+    falls back to edge/contour tracing.
 
     Args:
         image: A BGR image (as loaded by OpenCV) of a card on a plain,
@@ -231,16 +347,15 @@ def detect_card(image: np.ndarray) -> CardDetection:
 
     source = _resize_to_max_dim(image, MAX_PROCESS_DIM)
 
-    gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, BLUR_KERNEL, 0)
-    edges = cv2.Canny(blurred, CANNY_LOW, CANNY_HIGH)
-
-    # Close small gaps in the outline so the card forms one continuous contour.
-    if EDGE_DILATE_ITERS > 0:
-        edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=EDGE_DILATE_ITERS)
-
-    image_area = float(source.shape[0] * source.shape[1])
-    corners = _find_card_contour(edges, image_area)
+    corners = _detect_by_segmentation(source)
+    if corners is None:
+        # Fallback: classic edge tracing (raises CardDetectionError if it fails).
+        gray = cv2.cvtColor(source, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, BLUR_KERNEL, 0)
+        edges = cv2.Canny(blurred, CANNY_LOW, CANNY_HIGH)
+        if EDGE_DILATE_ITERS > 0:
+            edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=EDGE_DILATE_ITERS)
+        corners = _find_card_contour(edges, float(source.shape[0] * source.shape[1]))
 
     rectified = four_point_transform(source, corners)
     ordered_corners = order_points(corners)

@@ -1,0 +1,3 @@
+# Deployment-only dependency for serving the QR report web service.
+-r requirements.txt
+gunicorn>=21.2

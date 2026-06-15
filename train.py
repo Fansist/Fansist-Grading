@@ -26,7 +26,7 @@ import os
 
 import cv2
 
-from calibration import evaluate, train_calibration
+from calibration import cross_validate, evaluate, train_calibration
 from card_detector import CardDetectionError
 from pipeline import extract_features
 
@@ -72,6 +72,8 @@ def main(argv=None) -> int:
     p.add_argument("--manifest", required=True, help="CSV of image + known grades.")
     p.add_argument("--images-root", default=".", help="Root for relative image paths.")
     p.add_argument("--out", default="calibration.json", help="Where to save the calibration.")
+    p.add_argument("--cv", type=int, default=0, metavar="K",
+                   help="Also report K-fold cross-validated (held-out) accuracy.")
     args = p.parse_args(argv)
 
     records, skipped = load_records(args.manifest, args.images_root)
@@ -89,9 +91,18 @@ def main(argv=None) -> int:
     print(f"{'factor':10s} {'n':>4s} {'MAE before':>11s} {'MAE after':>10s}")
     for k, v in metrics.items():
         print(f"{k:10s} {v['n']:>4d} {str(v['mae_baseline']):>11s} {str(v['mae_calibrated']):>10s}")
+
+    if args.cv and len(records) >= args.cv:
+        cv = cross_validate(records, k=args.cv)
+        print(f"\n{args.cv}-fold cross-validated (held-out) accuracy:")
+        print(f"{'factor':10s} {'n':>4s} {'MAE before':>11s} {'MAE after':>10s}")
+        for k, v in cv.items():
+            print(f"{k:10s} {v['n']:>4d} {str(v['mae_baseline']):>11s} {str(v['mae_calibrated']):>10s}")
+
+    print(f"\nlearned overall rule: {calibration.overall_strategy or 'default'}", end="")
     if calibration.overall_weights:
-        w = {k: round(x, 3) for k, x in calibration.overall_weights.items()}
-        print(f"\nlearned overall weights: {w}")
+        print(f"  weights={ {k: round(x, 3) for k, x in calibration.overall_weights.items()} }", end="")
+    print()
     print("\nApply it:  FANSIST_CALIBRATION=%s python report.py card.jpg --store ./cards"
           % args.out)
     return 0

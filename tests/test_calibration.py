@@ -5,6 +5,7 @@ import numpy as np
 from calibration import (
     Calibration,
     FactorCurve,
+    cross_validate,
     evaluate,
     load_optional,
     predict_from_features,
@@ -105,6 +106,16 @@ def test_overall_can_learn_a_lowest_dominates_rule():
     # The learned overall matches far better than the default weighted average.
     assert m["mae_calibrated"] <= m["mae_baseline"]
     assert m["mae_calibrated"] < 0.6
+
+
+def test_cross_validate_reports_held_out_accuracy():
+    records = _synthetic_records(60)
+    cv = cross_validate(records, k=5)
+    for factor in ("centering", "corners", "edges", "surface", "overall"):
+        assert cv[factor]["n"] > 0
+        assert cv[factor]["mae_calibrated"] is not None
+    # On data with a clean signal, held-out corners should still beat the default.
+    assert cv["corners"]["mae_calibrated"] <= cv["corners"]["mae_baseline"] + 0.5
 
 
 def test_save_load_roundtrip(tmp_path):

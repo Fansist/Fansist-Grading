@@ -115,8 +115,19 @@ FANSIST_STORE=./cards python web_report.py        # http://localhost:8000
 ```
 
 `report.py` builds the stats record + QR; `web_report.py` is a small Flask app
-serving `/card/<cert_id>`. The Streamlit app also shows the QR + report link
-(set `FANSIST_STORE` to persist and `FANSIST_BASE_URL` to your domain).
+serving `/card/<cert_id>` plus a registry index at `/` with a population count.
+The Streamlit app also shows the QR + report link (set `FANSIST_STORE` to persist
+and `FANSIST_BASE_URL` to your domain).
+
+**Deploy the report service** (so the QR points at a real domain):
+
+```bash
+docker build -t fansist-grading .
+docker run -p 8000:8000 -v $PWD/cards:/data/cards \
+    -e FANSIST_STORE=/data/cards -e FANSIST_BASE_URL=https://grade.example \
+    fansist-grading
+# or directly:  FANSIST_STORE=./cards gunicorn -w 2 -b 0.0.0.0:8000 wsgi:app
+```
 
 ### Training / calibrating on graded cards (make it accurate)
 
@@ -133,8 +144,10 @@ rule).
    average — e.g. PSA-style "worst sub-grade wins"), and reports the accuracy gain:
 
    ```bash
-   python train.py --manifest data/labels.csv --images-root ./graded --out calibration.json
+   python train.py --manifest data/labels.csv --images-root ./graded --out calibration.json --cv 5
    ```
+   `--cv K` adds **K-fold cross-validated (held-out)** accuracy — the honest
+   number for how it generalises to unseen cards (vs. the optimistic in-sample fit).
    ```
    factor        n  MAE before  MAE after
    corners      12       0.667      0.333
@@ -241,9 +254,11 @@ calibration.py         Learn the grade mapping from graded cards (isotonic fit).
 train.py               CLI: train a calibration from a CSV of graded cards.
 pipeline.py            Headless detect -> 4 factors -> grade + decode + annotate + CLI.
 report.py              Cert id + QR + TAG-style stats record; persistence + CLI.
-web_report.py          Flask page (/card/<cert_id>) the slab QR opens.
+web_report.py          Flask page (/card/<cert_id>) + registry index the QR opens.
+wsgi.py / Dockerfile   Production entry for the report service (gunicorn/Docker).
 app.py                 Streamlit UI (thin layer over pipeline.py) incl. the QR.
 data/                  labels.example.csv (training manifest format).
+docs/ARCHITECTURE.md   How all the pieces fit together.
 tests/                 pytest suite + synthetic-card fixtures.
 requirements.txt       Runtime deps (OpenCV, NumPy, Streamlit).
 requirements-dev.txt   Test deps (adds pytest).

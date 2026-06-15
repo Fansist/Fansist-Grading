@@ -21,7 +21,7 @@ import os
 
 from flask import Flask, abort, render_template_string, send_from_directory
 
-from report import load_report
+from report import list_reports, load_report, population
 
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -73,8 +73,8 @@ PAGE = """<!doctype html>
     </div>
     <div style="color:var(--mut)">
       Overall grade combined from the four sub-grades below.
-      {% if r.meta.get('population_graded') %}<br>Population graded:
-      {{ r.meta['population_graded'] }}.{% endif %}
+      <br>Registry population: {{ population }} graded ·
+      <a href="/">browse registry</a>
     </div>
   </div>
 
@@ -140,6 +140,30 @@ PAGE = """<!doctype html>
 </div></body></html>"""
 
 
+INDEX = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fansist Grading — registry</title>
+<style>
+  body{margin:0;background:#0f1115;color:#e8eaed;
+    font:15px/1.5 system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:760px;margin:0 auto;padding:24px}
+  h1{font-size:20px} .pop{color:#9aa0aa;margin-bottom:16px}
+  table{width:100%;border-collapse:collapse;background:#1a1d24;border-radius:12px;overflow:hidden}
+  td,th{padding:10px 12px;text-align:left;border-bottom:1px solid #262a33;font-size:14px}
+  th{color:#9aa0aa} a{color:#4da3ff;text-decoration:none}
+</style></head><body><div class="wrap">
+  <h1>🃏 Fansist Grading — registry</h1>
+  <div class="pop">Population: {{ pop }} graded card{{ '' if pop == 1 else 's' }}.</div>
+  {% if rows %}<table><tr><th>Cert</th><th>Overall</th><th>/1000</th><th>Graded</th></tr>
+  {% for r in rows %}<tr>
+    <td><a href="/card/{{ r.cert_id }}">{{ r.cert_id }}</a></td>
+    <td>{{ '—' if r.overall_grade is none else '%g'|format(r.overall_grade) }}</td>
+    <td>{{ r.overall_score_1000 if r.overall_score_1000 is not none else '—' }}</td>
+    <td>{{ r.graded_at }}</td></tr>{% endfor %}</table>
+  {% else %}<p>No cards graded yet. Grade one with <code>report.py</code>.</p>{% endif %}
+</div></body></html>"""
+
+
 def create_app(store_dir: str) -> Flask:
     """Create the Flask app serving reports from ``store_dir``."""
     app = Flask(__name__)
@@ -157,7 +181,7 @@ def create_app(store_dir: str) -> Flask:
         if report is None:
             abort(404)
         return render_template_string(
-            PAGE, r=report, fmt=fmt, pc=pc,
+            PAGE, r=report, fmt=fmt, pc=pc, population=population(store),
             url=lambda role: f"/card/{cert_id}/img/{report.images.get(role, '')}",
         )
 
@@ -170,12 +194,12 @@ def create_app(store_dir: str) -> Flask:
 
     @app.route("/health")
     def health():
-        return {"ok": True, "store": store}
+        return {"ok": True, "store": store, "population": population(store)}
 
     @app.route("/")
     def index():
-        return ("Fansist Grading — scan a slab's QR code, or open "
-                "/card/&lt;cert_id&gt;.")
+        rows = list_reports(store)
+        return render_template_string(INDEX, rows=rows, pop=len(rows))
 
     return app
 

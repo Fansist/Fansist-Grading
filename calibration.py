@@ -288,3 +288,41 @@ def evaluate(records: list[dict], calibration: Optional[Calibration]) -> dict:
     return {k: {"n": len(err[k]["baseline"]),
                 "mae_baseline": _mae(err[k]["baseline"]),
                 "mae_calibrated": _mae(err[k]["calibrated"])} for k in keys}
+
+
+def cross_validate(records: list[dict], k: int = 5, seed: int = 0) -> dict:
+    """K-fold cross-validation: HELD-OUT accuracy (the honest number).
+
+    For each fold we train on the other folds and predict the held-out cards, so
+    the reported MAE reflects how the calibration generalises to *unseen* cards
+    rather than the (optimistic) training-set fit. Same shape as :func:`evaluate`.
+    """
+    keys = ("centering", "corners", "edges", "surface", "overall")
+    n = len(records)
+    k = max(2, min(k, n))
+    idx = np.arange(n)
+    np.random.default_rng(seed).shuffle(idx)
+    folds = np.array_split(idx, k)
+
+    err = {key: {"baseline": [], "calibrated": []} for key in keys}
+    for f in range(k):
+        test_ids = set(folds[f].tolist())
+        train = [records[i] for i in range(n) if i not in test_ids]
+        test = [records[i] for i in folds[f]]
+        if not train or not test:
+            continue
+        cal = train_calibration(train)
+        for rec in test:
+            base = predict_from_features(rec["features"], None)
+            calp = predict_from_features(rec["features"], cal)
+            for key in keys:
+                if key in rec["labels"] and base.get(key) is not None:
+                    err[key]["baseline"].append(abs(base[key] - rec["labels"][key]))
+                    err[key]["calibrated"].append(abs(calp[key] - rec["labels"][key]))
+
+    def _mae(v):
+        return round(float(np.mean(v)), 3) if v else None
+
+    return {key: {"n": len(err[key]["baseline"]),
+                  "mae_baseline": _mae(err[key]["baseline"]),
+                  "mae_calibrated": _mae(err[key]["calibrated"])} for key in keys}

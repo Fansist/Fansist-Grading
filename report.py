@@ -213,6 +213,35 @@ def load_report(store_dir: str, cert_id: str) -> GradeReport | None:
         return GradeReport(**json.load(fh))
 
 
+def list_reports(store_dir: str) -> list[dict]:
+    """Summaries of every stored cert (newest first) for the registry index."""
+    out: list[dict] = []
+    if not os.path.isdir(store_dir):
+        return out
+    for name in os.listdir(store_dir):
+        path = os.path.join(store_dir, name, "report.json")
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                d = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            continue
+        out.append({
+            "cert_id": d.get("cert_id", name),
+            "overall_grade": d.get("overall_grade"),
+            "overall_score_1000": d.get("overall_score_1000"),
+            "graded_at": d.get("graded_at", ""),
+        })
+    out.sort(key=lambda r: r["graded_at"], reverse=True)
+    return out
+
+
+def population(store_dir: str) -> int:
+    """Total number of graded cards in the store (the registry 'population')."""
+    return len(list_reports(store_dir))
+
+
 def grade_image_to_report(
     image_bgr,
     store_dir: str,

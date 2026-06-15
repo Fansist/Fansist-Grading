@@ -6,9 +6,11 @@ from pipeline import run_pipeline
 from report import (
     build_report,
     grade_image_to_report,
+    list_reports,
     load_report,
     make_qr_png_bytes,
     mint_cert_id,
+    population,
     save_report,
     _score_1000,
 )
@@ -112,3 +114,26 @@ def test_web_serves_images_and_404s(tmp_path):
     assert client.get("/card/FAN-MISSING000/img/qr.png").status_code == 404
     assert client.get("/card/FAN-MISSING000").status_code == 404
     assert client.get("/health").status_code == 200
+
+
+def test_registry_listing_and_population(tmp_path):
+    result = _result()
+    r1 = build_report(result, base_url="https://example.test")
+    r2 = build_report(result, base_url="https://example.test")
+    save_report(r1, result, str(tmp_path))
+    save_report(r2, result, str(tmp_path))
+
+    listed = list_reports(str(tmp_path))
+    assert {r["cert_id"] for r in listed} == {r1.cert_id, r2.cert_id}
+    assert population(str(tmp_path)) == 2
+    assert population(str(tmp_path / "nope")) == 0
+
+
+def test_web_index_shows_registry(tmp_path):
+    app, cert_id = _app_with_one_card(tmp_path)
+    client = app.test_client()
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert cert_id in body
+    assert "Population" in body

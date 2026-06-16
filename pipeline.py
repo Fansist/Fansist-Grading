@@ -117,7 +117,7 @@ def run_pipeline(
         grade = build_grade_direct(
             centering.horizontal_ratio, centering.vertical_ratio,
             corners=ml.get("corners"), edges=ml.get("edges"), surface=ml.get("surface"),
-            calibration=calibration,
+            calibration=calibration, overall_direct=ml.get("overall"),
         )
     elif assess_condition:
         grade = build_full_grade(

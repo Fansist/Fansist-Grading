@@ -342,13 +342,15 @@ def build_grade_direct(
     edges: Optional[float] = None,
     surface: Optional[float] = None,
     calibration=None,
+    overall_direct: Optional[float] = None,
 ) -> CardGrade:
-    """Assemble a :class:`CardGrade` from DIRECT condition sub-grades (1-10).
+    """Assemble a :class:`CardGrade` from DIRECT sub-grades (1-10).
 
-    Used by the ML grader, which predicts corner/edge/surface grades directly
-    (rather than a wear score the scale maps). Centering is still measured/
-    calibrated (it's geometric and reliable). Labels come from the nearest scale
-    tier; the overall honours a calibration's strategy/weights.
+    Used by the ML grader, which predicts grades directly (rather than a wear
+    score the scale maps). Centering is still measured/calibrated (it's geometric
+    and reliable). If the model predicts no condition sub-grades but does predict
+    ``overall_direct`` (a holistic, e.g. PSA-style overall), that drives the
+    overall; otherwise the overall is composed from the present sub-grades.
     """
     if calibration is not None and calibration.centering is not None:
         worse = worse_centering_percent(horizontal_ratio, vertical_ratio)
@@ -370,13 +372,18 @@ def build_grade_direct(
     if surface is not None:
         grade.surface, grade.surface_label = surface, label_for_grade(surface, SURFACE_GRADE_SCALE)
 
-    cal_strategy = calibration.overall_strategy if calibration is not None else None
-    cal_weights = calibration.overall_weights if calibration is not None else None
-    if cal_strategy or cal_weights:
-        grade.overall = compute_overall(grade.sub_scores(),
-                                        strategy=cal_strategy or "weighted", weights=cal_weights)
+    has_condition = any(v is not None for v in (corners, edges, surface))
+    if overall_direct is not None and not has_condition:
+        # Holistic model (e.g. trained only on PSA/CGC overall) -> use it directly.
+        grade.overall = _round_half(min(10.0, max(1.0, overall_direct)))
     else:
-        grade.overall = compute_overall(grade.sub_scores())
+        cal_strategy = calibration.overall_strategy if calibration is not None else None
+        cal_weights = calibration.overall_weights if calibration is not None else None
+        if cal_strategy or cal_weights:
+            grade.overall = compute_overall(grade.sub_scores(),
+                                            strategy=cal_strategy or "weighted", weights=cal_weights)
+        else:
+            grade.overall = compute_overall(grade.sub_scores())
     return grade
 
 
@@ -420,7 +427,14 @@ def combine_grades(
     combined.edges, combined.edges_label = worst(front.edges, back.edges, EDGE_GRADE_SCALE)
     combined.surface, combined.surface_label = worst(front.surface, back.surface, SURFACE_GRADE_SCALE)
 
-    if overall_strategy or overall_weights:
+    has_condition = any(v is not None for v in
+                        (combined.corners, combined.edges, combined.surface))
+    if not has_condition:
+        # Holistic (overall-only) grades, e.g. from a PSA/CGC-trained model:
+        # take the worse side's overall.
+        overalls = [g.overall for g in (front, back) if g.overall is not None]
+        combined.overall = min(overalls) if overalls else compute_overall(combined.sub_scores())
+    elif overall_strategy or overall_weights:
         combined.overall = compute_overall(combined.sub_scores(),
                                            strategy=overall_strategy or "weighted",
                                            weights=overall_weights)

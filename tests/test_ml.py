@@ -10,7 +10,7 @@ import pytest
 torch = pytest.importorskip("torch")  # skip whole module if torch absent
 
 from ml_grader import (  # noqa: E402
-    FACTORS,
+    TARGETS,
     CardGraderNet,
     MLGrader,
     logits_to_grades,
@@ -23,7 +23,12 @@ from conftest import make_card, make_scene  # noqa: E402
 def test_model_forward_shape():
     net = CardGraderNet(pretrained=False)
     out = net(torch.randn(2, 3, 224, 224))
-    assert out.shape == (2, len(FACTORS))
+    assert out.shape == (2, len(TARGETS))
+
+
+def test_dynamic_head_size():
+    net = CardGraderNet(pretrained=False, n_out=1)   # e.g. overall-only
+    assert net(torch.randn(2, 3, 224, 224)).shape == (2, 1)
 
 
 def test_preprocess_and_grade_range():
@@ -39,7 +44,7 @@ def test_one_training_step_runs_and_reduces_loss():
     net.freeze_backbone()
     opt = torch.optim.Adam([p for p in net.parameters() if p.requires_grad], lr=1e-2)
     x = torch.stack([preprocess(make_card()), preprocess(make_card(40, 40, 40, 40))])
-    target = torch.tensor([[1.0, 9.0, 8.0, 10.0], [9.0, 9.0, 9.0, 9.0]])
+    target = torch.tensor([[5.0, 1.0, 9.0, 8.0, 10.0], [5.0, 9.0, 9.0, 9.0, 9.0]])
     mask = torch.ones_like(target)
     tgt_sig = (target - 1.0) / 9.0
 
@@ -59,21 +64,36 @@ def test_one_training_step_runs_and_reduces_loss():
 def test_save_load_and_grade(tmp_path):
     net = CardGraderNet(pretrained=False)
     path = tmp_path / "model.pth"
-    torch.save({"model": net.state_dict(), "factors": FACTORS}, str(path))
+    torch.save({"model": net.state_dict(), "factors": TARGETS}, str(path))
 
     grader = MLGrader(str(path))
     out = grader.grade(make_card())
-    assert set(out) == set(FACTORS)
+    assert set(out) == set(TARGETS)
     assert all(1.0 <= v <= 10.0 for v in out.values())
     # Multi-angle pooling path runs too.
     out2 = grader.grade(make_card(), extra_frames=[make_card(), make_card()])
-    assert set(out2) == set(FACTORS)
+    assert set(out2) == set(TARGETS)
+
+
+def test_overall_only_model_drives_overall(tmp_path):
+    # A model trained only on `overall` (PSA/CGC style) sets the overall directly.
+    net = CardGraderNet(pretrained=False, n_out=1)
+    path = tmp_path / "overall.pth"
+    torch.save({"model": net.state_dict(), "factors": ["overall"]}, str(path))
+    grader = MLGrader(str(path))
+
+    out = grader.grade(make_card())
+    assert set(out) == {"overall"}
+    result = run_pipeline(make_scene(), ml_model=grader)
+    assert result.grade.corners is None       # no condition sub-grades predicted
+    # overall comes from the model (within half-step rounding).
+    assert abs(result.grade.overall - out["overall"]) <= 0.25
 
 
 def test_pipeline_uses_ml_model(tmp_path):
     net = CardGraderNet(pretrained=False)
     path = tmp_path / "model.pth"
-    torch.save({"model": net.state_dict(), "factors": FACTORS}, str(path))
+    torch.save({"model": net.state_dict(), "factors": TARGETS}, str(path))
     grader = MLGrader(str(path))
 
     scene = make_scene()

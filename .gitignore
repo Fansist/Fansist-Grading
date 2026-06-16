@@ -19,8 +19,9 @@ env/
 # Streamlit
 .streamlit/secrets.toml
 
-# Local card/report store written by report.save_report / web_report.py
+# Local card/report + submission stores
 cards/
+submissions/
 # Trained calibration output (user artifact)
 calibration.json
 # Trained CNN checkpoints (user artifact; large)

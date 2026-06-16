@@ -23,6 +23,15 @@ from flask import Flask, abort, render_template_string, send_from_directory
 
 from report import list_reports, load_report, population
 
+# Friendly captions for the image gallery (covers AI- and human-submitted roles).
+GALLERY_CAPTIONS = {
+    "front": "Front", "back": "Back",
+    "original": "Detected card", "centering": "Centering",
+    "condition": "Corners / edges / surface",
+    "back_original": "Back — detected", "back_centering": "Back — centering",
+    "back_condition": "Back — condition",
+}
+
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -93,6 +102,14 @@ PAGE = """<!doctype html>
       <div class="l">Surface</div><div class="n">{{ r.surface_label }}</div></div>
   </div>
 
+  {% if r.graded_by and r.graded_by.startswith('human') %}
+  <div class="qr" style="margin-top:0">
+    <div>✔️ Graded by a human grader{{ ' (' ~ r.graded_by.split(':')[1] ~ ')' if ':' in r.graded_by }}.
+      {% if r.notes %}<div class="cert">Notes: {{ r.notes }}</div>{% endif %}</div>
+  </div>
+  {% endif %}
+
+  {% if r.centering_detail %}
   <h2>Centering</h2>
   {% set csides = [('Front', r.centering_detail)] %}
   {% if r.sides == 2 %}{% set csides = csides + [('Back', r.back_centering_detail)] %}{% endif %}
@@ -107,6 +124,7 @@ PAGE = """<!doctype html>
         {{ d.margins_px.top }} / {{ d.margins_px.bottom }}</td></tr>
     {% endfor %}
   </table>
+  {% endif %}
 
   {% if r.corners_detail %}
   <h2>Corners (per corner)</h2>
@@ -140,20 +158,12 @@ PAGE = """<!doctype html>
   </table>
   {% endif %}
 
-  <h2>Imagery{% if r.sides == 2 %} — front{% endif %}</h2>
+  <h2>Imagery</h2>
   <div class="imgs">
-    <figure><img src="{{ url('original') }}" alt="card"><figcaption>Detected card</figcaption></figure>
-    <figure><img src="{{ url('centering') }}" alt="centering"><figcaption>Centering</figcaption></figure>
-    <figure><img src="{{ url('condition') }}" alt="condition"><figcaption>Corners / edges / surface</figcaption></figure>
+    {% for src, cap in gallery %}
+    <figure><img src="{{ src }}" alt="{{ cap }}"><figcaption>{{ cap }}</figcaption></figure>
+    {% endfor %}
   </div>
-  {% if r.sides == 2 %}
-  <h2>Imagery — back</h2>
-  <div class="imgs">
-    <figure><img src="{{ url('back_original') }}" alt="back"><figcaption>Detected card</figcaption></figure>
-    <figure><img src="{{ url('back_centering') }}" alt="back centering"><figcaption>Centering</figcaption></figure>
-    <figure><img src="{{ url('back_condition') }}" alt="back condition"><figcaption>Corners / edges / surface</figcaption></figure>
-  </div>
-  {% endif %}
 
   <div class="qr">
     <img src="{{ url('qr') }}" alt="QR">
@@ -161,8 +171,10 @@ PAGE = """<!doctype html>
       <div class="cert">{{ r.report_url }}</div></div>
   </div>
 
-  <p class="disc">Automated estimate from computer-vision analysis of the card
-  image(s) — for reference, not an official third-party grade.</p>
+  <p class="disc">{% if r.graded_by and r.graded_by.startswith('human') %}Grade
+  determined by a human grader from the submitted images.{% else %}Automated
+  estimate from computer-vision analysis of the card image(s) — for reference,
+  not an official third-party grade.{% endif %}</p>
 </div></body></html>"""
 
 
@@ -206,8 +218,12 @@ def create_app(store_dir: str) -> Flask:
         report = load_report(store, cert_id)
         if report is None:
             abort(404)
+        gallery = [(f"/card/{cert_id}/img/{fname}",
+                    GALLERY_CAPTIONS.get(role, role.replace("_", " ").title()))
+                   for role, fname in report.images.items()
+                   if role != "qr" and fname]
         return render_template_string(
-            PAGE, r=report, fmt=fmt, pc=pc, population=population(store),
+            PAGE, r=report, fmt=fmt, pc=pc, population=population(store), gallery=gallery,
             url=lambda role: f"/card/{cert_id}/img/{report.images.get(role, '')}",
         )
 

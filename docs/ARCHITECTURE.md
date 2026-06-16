@@ -1,7 +1,30 @@
 # Architecture
 
-How the pieces of Fansist Grading fit together — software pipeline, the learnable
-calibration, the QR report service, and the hardware that feeds it.
+How the pieces of Fansist Grading fit together.
+
+## Product: capture → human grader (no shipping)
+
+```
+  capture (quality-checked)   submit.py / app  ─ capture_qc.py ─▶  reject bad shots
+        ▼
+  submission.py   create_submission → store/<id>/ {front,back,...}.png + submission.json
+        ▼
+  grader_portal.py (internal)   human reviews images, enters grade
+        ▼   grade_submission → report.build_human_report → store/<id>/report.json + qr.png
+  web_report.py (public)   /card/<id>  grade + images + QR + registry
+```
+
+The submission id doubles as the public cert id; one store backs both the
+internal portal and the public report app. A pending submission has only
+`submission.json` (not public); grading adds `report.json` (servable).
+`capture_qc.py` reuses the card detector purely to confirm framing/focus/glare —
+it does not grade.
+
+## Optional automated engine (retained, not the product path)
+
+Everything below — detection, the four CV graders, calibration, the CNN — is the
+*automated* grader, kept for future use (draft estimates / pre-screening). It is
+independent of the human-grading product loop above.
 
 ## Data flow
 

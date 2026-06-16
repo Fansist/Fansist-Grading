@@ -1,10 +1,57 @@
-# 🃏 Trading Card Grader
+# 🃏 Fansist Grading
 
-A small, runnable Python app that analyses a single photo of a trading card and
-produces a **full grade** (à la TAG/PSA) from four factors — **centering,
-corners, edges, and surface** — combined into an overall grade. It locates the
-card, flattens it with a perspective transform, then measures each factor on the
-rectified image.
+**The product: grade your cards from home — no shipping.** A customer captures
+**pristine images** of a card, those go **straight to a human grader**, and the
+customer gets a graded, QR-linked digital report. No mailing the card, no waiting
+for a slab in the post.
+
+The capture → human-grader loop:
+
+```
+  capture (front/back, quality-checked)        submit.py / capture app
+        │  capture_qc.py rejects blurry/glary/low-res shots
+        ▼
+  SUBMISSION  (images + card info, queued)      submission.py
+        │
+        ▼
+  HUMAN GRADER reviews images, enters grade     grader_portal.py  (internal)
+        │
+        ▼
+  customer report: grade + images + QR          web_report.py     (public /card/<id>)
+```
+
+Run it:
+
+```bash
+pip install -r requirements.txt
+python submit.py front.jpg --back back.jpg --name "Victini" --store ./submissions
+FANSIST_STORE=./submissions python grader_portal.py   # grader UI  :8001
+FANSIST_STORE=./submissions python web_report.py      # customer reports + registry :8000
+```
+
+> **The high-quality, consistent imaging is the whole product** — see the capture
+> hardware in [`docs/`](docs/) (lightbox, cross-polarised lighting to kill holo
+> glare, fixed geometry). `capture_qc.py` enforces grade-worthy photos before
+> anything reaches a grader.
+
+---
+
+## Optional: built-in CV/ML grading engine (experimental, retained)
+
+The repo also contains a complete **automated** four-factor grader (centering /
+corners / edges / surface), a learnable **calibration**, and a **CNN** — kept for
+future use (e.g. to give graders a draft estimate or pre-screen). It is **not**
+the product path above and its grades are estimates, not official. The rest of
+this README documents that engine.
+
+---
+
+## Automated grader (optional engine)
+
+A runnable pipeline that analyses a photo and produces a **full grade** from four
+factors — **centering, corners, edges, and surface** — combined into an overall.
+It locates the card, flattens it with a perspective transform, then measures each
+factor on the rectified image.
 
 **Classic computer vision, no heavy ML.** No deep-learning framework, no hardware,
 no live camera, no batch processing — just OpenCV + NumPy with tunable constants,
@@ -281,6 +328,10 @@ corners.py             Per-corner whitening/chipping -> corner wear score.
 edges.py               Per-edge whitening/chipping -> edge wear score.
 surface.py             High-pass defect detection -> surface defect score.
 condition_utils.py     Shared border-reference / anomaly helpers for corners+edges.
+capture_qc.py          Photo quality gate (sharp/framed/glare-free/hi-res) for capture.
+submission.py          Capture -> queue -> human grade lifecycle.
+submit.py              CLI: create a submission from captured images.
+grader_portal.py       Internal Flask portal: human grader reviews + grades.
 grading.py             Map each factor to a sub-grade; combine into overall; CardGrade.
 calibration.py         Learn the grade mapping from graded cards (isotonic fit).
 train.py               CLI: train a calibration from a CSV of graded cards.

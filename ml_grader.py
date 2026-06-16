@@ -32,15 +32,19 @@ import torch
 import torch.nn as nn
 import torchvision
 
-# Factors the CNN predicts, in output order.
-FACTORS = ("centering", "corners", "edges", "surface")
+# Targets the CNN can predict (any subset, chosen from the labelled columns).
+# `overall` is included because most graded cards (PSA/CGC) carry only an overall
+# grade -- the model must be able to learn from that alone.
+TARGETS = ("centering", "corners", "edges", "surface", "overall")
+CONDITION_FACTORS = ("corners", "edges", "surface")
+FACTORS = TARGETS  # backwards-compatible alias
 IMG_SIZE = 224
 _MEAN = (0.485, 0.456, 0.406)   # ImageNet normalisation
 _STD = (0.229, 0.224, 0.225)
 
 
-def _build_backbone(pretrained: bool) -> nn.Module:
-    """MobileNetV3-Small with the classifier replaced by a 4-factor head."""
+def _build_backbone(pretrained: bool, n_out: int) -> nn.Module:
+    """MobileNetV3-Small with the classifier replaced by an ``n_out`` head."""
     weights = None
     if pretrained:
         try:  # weights download needs network the first time; degrade gracefully
@@ -55,20 +59,20 @@ def _build_backbone(pretrained: bool) -> nn.Module:
     in_features = net.classifier[0].in_features
     net.classifier = nn.Sequential(
         nn.Linear(in_features, 256), nn.Hardswish(), nn.Dropout(0.2),
-        nn.Linear(256, len(FACTORS)),
+        nn.Linear(256, n_out),
     )
     return net
 
 
 class CardGraderNet(nn.Module):
-    """CNN mapping a card image to four raw factor logits."""
+    """CNN mapping a card image to ``n_out`` raw grade logits."""
 
-    def __init__(self, pretrained: bool = True):
+    def __init__(self, pretrained: bool = True, n_out: int = len(TARGETS)):
         super().__init__()
-        self.backbone = _build_backbone(pretrained)
+        self.backbone = _build_backbone(pretrained, n_out)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.backbone(x)  # (B, 4) raw logits
+        return self.backbone(x)  # (B, n_out) raw logits
 
     def freeze_backbone(self) -> None:
         """Train only the head (recommended for small datasets)."""
@@ -102,8 +106,8 @@ class MLGrader:
     def __init__(self, checkpoint_path: str, device: str = "cpu"):
         self.device = torch.device(device)
         ckpt = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
-        self.factors = tuple(ckpt.get("factors", FACTORS))
-        self.model = CardGraderNet(pretrained=False).to(self.device)
+        self.factors = tuple(ckpt.get("factors", TARGETS))
+        self.model = CardGraderNet(pretrained=False, n_out=len(self.factors)).to(self.device)
         self.model.load_state_dict(ckpt["model"])
         self.model.eval()
 

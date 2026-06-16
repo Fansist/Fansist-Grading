@@ -6,9 +6,10 @@ grades — this is how the AI "learns what a 10 vs a 9 looks like".
     python train_ml.py --manifest data/labels.csv --images-root graded \
         --out model.pth --epochs 40 --freeze
 
-CSV columns: `image` plus any of `centering, corners, edges, surface` (1-10;
-blanks = unknown for that factor on that card). `overall` is ignored here (it's
-recomputed from the four factors at grade time). Then grade with it:
+CSV columns: `image` plus any of `centering, corners, edges, surface, overall`
+(1-10; blanks = unknown). The model learns **whichever grade columns you fill
+in** — so a dataset with only `overall` (typical for PSA/CGC) trains an
+overall predictor; a TAG-style dataset with subgrades trains all of them.
 
     FANSIST_ML_MODEL=model.pth python report.py card.jpg --store ./cards
 
@@ -27,18 +28,23 @@ import random
 import cv2
 import numpy as np
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from ml_grader import FACTORS, CardGraderNet, grades_to_targets, logits_to_grades, preprocess
+from ml_grader import TARGETS, CardGraderNet, grades_to_targets, logits_to_grades, preprocess
 
 
 class CardDataset(Dataset):
-    """Card images + (masked) factor-grade targets, with light augmentation."""
+    """Card images + (masked) grade targets, with light augmentation.
 
-    def __init__(self, rows: list[dict], images_root: str, train: bool):
+    Targets/masks are sized to ``active`` (the grade columns actually present).
+    Unreadable images yield an all-zero target with a zero mask, so a few bad
+    files never crash a long training run.
+    """
+
+    def __init__(self, rows: list[dict], images_root: str, active: list[str], train: bool):
         self.rows = rows
         self.root = images_root
+        self.active = active
         self.train = train
 
     def __len__(self) -> int:
@@ -47,23 +53,21 @@ class CardDataset(Dataset):
     def _augment(self, img: np.ndarray) -> np.ndarray:
         if random.random() < 0.5:
             img = cv2.flip(img, 1)
-        # mild brightness/contrast jitter so it doesn't memorise exposure
-        alpha = 1.0 + random.uniform(-0.12, 0.12)
+        alpha = 1.0 + random.uniform(-0.12, 0.12)   # mild brightness/contrast jitter
         beta = random.uniform(-12, 12)
         return cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
 
     def __getitem__(self, idx):
         row = self.rows[idx]
         img = cv2.imread(os.path.join(self.root, row["image"]), cv2.IMREAD_COLOR)
+        target = torch.zeros(len(self.active))
+        mask = torch.zeros(len(self.active))
         if img is None:
-            raise FileNotFoundError(row["image"])
+            return torch.zeros(3, 224, 224), target, mask  # skip-effect
         if self.train:
             img = self._augment(img)
         x = preprocess(img)
-
-        target = torch.zeros(len(FACTORS))
-        mask = torch.zeros(len(FACTORS))
-        for i, f in enumerate(FACTORS):
+        for i, f in enumerate(self.active):
             if row.get(f) is not None:
                 target[i] = float(row[f])
                 mask[i] = 1.0
@@ -78,23 +82,23 @@ def load_rows(manifest: str) -> list[dict]:
             if not img:
                 continue
             row = {"image": img}
-            for f in FACTORS:
-                v = (r.get(f) or "").strip()
-                row[f] = float(v) if v else None
+            for t in TARGETS:
+                v = (r.get(t) or "").strip()
+                try:
+                    row[t] = float(v) if v else None
+                except ValueError:
+                    row[t] = None
             rows.append(row)
     return rows
 
 
 def masked_mse(raw, target, mask):
-    pred = torch.sigmoid(raw)
-    tgt = grades_to_targets(target)
-    se = ((pred - tgt) ** 2) * mask
+    se = ((torch.sigmoid(raw) - grades_to_targets(target)) ** 2) * mask
     return se.sum() / mask.sum().clamp(min=1.0)
 
 
 def mae_grades(raw, target, mask):
-    pred = logits_to_grades(raw)
-    ae = (pred - target).abs() * mask
+    ae = (logits_to_grades(raw) - target).abs() * mask
     return ae.sum().item(), mask.sum().item()
 
 
@@ -107,7 +111,7 @@ def run_epoch(model, loader, optimizer, device):
         with torch.set_grad_enabled(train):
             raw = model(x)
             loss = masked_mse(raw, target, mask)
-            if train:
+            if train and mask.sum() > 0:
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -133,25 +137,50 @@ def main(argv=None) -> int:
 
     torch.manual_seed(args.seed)
     random.seed(args.seed)
+    np.random.seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     rows = load_rows(args.manifest)
     if not rows:
         print("No rows in manifest.")
         return 1
+
+    # Drop rows whose image file is missing (typos / not yet copied).
+    present, missing = [], 0
+    for r in rows:
+        if os.path.exists(os.path.join(args.images_root, r["image"])):
+            present.append(r)
+        else:
+            missing += 1
+    rows = present
+    if missing:
+        print(f"Skipped {missing} rows whose image file was not found under "
+              f"{args.images_root!r}.")
+    if not rows:
+        print("No usable images found. Check --images-root and the image paths.")
+        return 1
+
+    # Learn whichever grade columns are actually filled in.
+    active = [t for t in TARGETS if any(r.get(t) is not None for r in rows)]
+    if not active:
+        print("No grade labels found in any column "
+              f"({', '.join(TARGETS)}). Fill in at least one (e.g. 'overall').")
+        return 1
+    print(f"Training targets: {active}")
+
     random.shuffle(rows)
     n_val = int(len(rows) * args.val_split)
     val_rows, train_rows = rows[:n_val], rows[n_val:]
 
-    train_loader = DataLoader(CardDataset(train_rows, args.images_root, True),
+    train_loader = DataLoader(CardDataset(train_rows, args.images_root, active, True),
                               batch_size=args.batch_size, shuffle=True)
-    val_loader = (DataLoader(CardDataset(val_rows, args.images_root, False),
+    val_loader = (DataLoader(CardDataset(val_rows, args.images_root, active, False),
                              batch_size=args.batch_size) if val_rows else None)
 
-    model = CardGraderNet(pretrained=not args.no_pretrained).to(device)
+    model = CardGraderNet(pretrained=not args.no_pretrained, n_out=len(active)).to(device)
     if args.freeze:
         model.freeze_backbone()
-    params = [p for p in model.parameters() if p.requires_grad]
+    params = [pp for pp in model.parameters() if pp.requires_grad]
     optimizer = torch.optim.Adam(params, lr=args.lr)
 
     print(f"Training on {len(train_rows)} cards (val {len(val_rows)}) on {device}.")
@@ -164,7 +193,7 @@ def main(argv=None) -> int:
         if epoch % max(1, args.epochs // 10) == 0 or epoch == args.epochs:
             print(msg)
 
-    torch.save({"model": model.state_dict(), "factors": FACTORS}, args.out)
+    torch.save({"model": model.state_dict(), "factors": active}, args.out)
     print(f"\nSaved -> {args.out}\nApply:  FANSIST_ML_MODEL={args.out} "
           "python report.py card.jpg --store ./cards")
     if len(rows) < 50:

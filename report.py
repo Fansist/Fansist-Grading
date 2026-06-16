@@ -28,7 +28,15 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from grading import grade_corners, grade_edges
+from grading import (
+    CENTERING_GRADE_SCALE,
+    CORNER_GRADE_SCALE,
+    EDGE_GRADE_SCALE,
+    SURFACE_GRADE_SCALE,
+    grade_corners,
+    grade_edges,
+    label_for_grade,
+)
 from pipeline import (
     PipelineResult,
     annotate_condition,
@@ -85,6 +93,8 @@ class GradeReport:
 
     images: dict = field(default_factory=dict)   # role -> filename
     meta: dict = field(default_factory=dict)      # card info / metadata
+    graded_by: str = "ai"                         # "ai" or "human:<grader id>"
+    notes: str = ""                               # grader notes
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -188,6 +198,56 @@ def build_report(
         back_surface_detail=back_surface,
         images=images,
         meta=meta or {},
+    )
+
+
+def _label(grade, scale):
+    return label_for_grade(grade, scale) if grade is not None else ""
+
+
+def build_human_report(
+    cert_id: str,
+    base_url: str,
+    grades: dict,
+    meta: dict | None = None,
+    images: dict | None = None,
+    graded_by: str = "human",
+    notes: str = "",
+    centering_detail: dict | None = None,
+    graded_at: str | None = None,
+) -> GradeReport:
+    """Build a report from grades a HUMAN grader entered (no AI).
+
+    ``grades`` may hold any of ``overall, centering, corners, edges, surface``
+    (1-10). ``images`` maps roles (e.g. ``front``/``back``) to filenames already
+    saved in the cert folder. Per-factor breakdowns are left empty (those were
+    AI-specific); ``centering_detail`` may carry an objective measurement.
+    """
+    graded_at = graded_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    overall = grades.get("overall")
+    imgs = dict(images or {})
+    imgs.setdefault("qr", IMG_QR)
+    return GradeReport(
+        cert_id=cert_id,
+        graded_at=graded_at,
+        report_url=f"{base_url.rstrip('/')}/card/{cert_id}",
+        overall_grade=overall,
+        overall_score_1000=_score_1000(overall),
+        centering_grade=grades.get("centering"),
+        centering_label=_label(grades.get("centering"), CENTERING_GRADE_SCALE),
+        corners_grade=grades.get("corners"),
+        corners_label=_label(grades.get("corners"), CORNER_GRADE_SCALE),
+        edges_grade=grades.get("edges"),
+        edges_label=_label(grades.get("edges"), EDGE_GRADE_SCALE),
+        surface_grade=grades.get("surface"),
+        surface_label=_label(grades.get("surface"), SURFACE_GRADE_SCALE),
+        centering_detail=centering_detail or {},
+        corners_detail={}, edges_detail={}, surface_detail={},
+        sides=2 if "back" in imgs else 1,
+        images=imgs,
+        meta=meta or {},
+        graded_by=graded_by,
+        notes=notes,
     )
 
 

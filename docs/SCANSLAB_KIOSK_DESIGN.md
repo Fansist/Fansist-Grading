@@ -303,7 +303,15 @@ laser to a single staffed finishing station) cuts the per-kiosk cost substantial
 
 ## 16. CAD / manufacturing deliverables (to produce)
 
-- Kiosk GA + sheet-metal cabinet drawings.
+**Provided now — Rev A CAD** in [`hardware/kiosk/`](../hardware/kiosk/) (parametric
+`generate_kiosk.py`): a dimensioned **general-arrangement 3D model** (STL — cabinet
+panels, internal module envelopes, the LED scan dome, and the redesigned
+**slab_v2** with code-label recess + frosted grade panel), the **sheet-metal
+cabinet flat patterns** (DXF — front with HMI/card-slot/tray cutouts, back with
+service door + vents, sides, top, bottom + a nest sheet), and renders. A
+sheet-metal shop can quote the DXF directly.
+
+**Still to produce (detailed design):**- Kiosk GA + sheet-metal cabinet drawings.
 - Scan-head optomechanics (camera/LED-dome/platen/polariser mounts) + the
   photometric-stereo calibration procedure.
 - Slab shell injection mould **with the frosted grade panel + code-label window**.

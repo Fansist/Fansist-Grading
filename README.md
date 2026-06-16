@@ -34,6 +34,22 @@ FANSIST_STORE=./submissions python web_report.py      # customer reports + regis
 > glare, fixed geometry). `capture_qc.py` enforces grade-worthy photos before
 > anything reaches a grader.
 
+### Self-service kiosk variant (scan · slab · grade-later)
+
+[`docs/SCANSLAB_KIOSK_DESIGN.md`](docs/SCANSLAB_KIOSK_DESIGN.md) designs a kiosk
+that **3D-scans** the card (photometric stereo → a relightable digital model for
+the grader), **slabs it on the spot with a tracking code** (grade left blank), and
+later **laser-prints the grade onto the slab** when the customer returns — no
+shipping, card protected from minute one. The software side is built here: the
+slab's QR points at **`/status/<code>`** (`IN_REVIEW → GRADED → PRINTED`), and
+`kiosk.py` is the finishing kiosk that releases the grade once it's ready.
+
+```bash
+python submit.py front.jpg --back back.jpg --store ./submissions   # intake: scan + slab + code
+python kiosk.py status <code> --store ./submissions                # "graded yet?"
+python kiosk.py print  <code> --store ./submissions                # release -> laser-mark the grade
+```
+
 ---
 
 ## Optional: built-in CV/ML grading engine (experimental, retained)
@@ -329,8 +345,9 @@ edges.py               Per-edge whitening/chipping -> edge wear score.
 surface.py             High-pass defect detection -> surface defect score.
 condition_utils.py     Shared border-reference / anomaly helpers for corners+edges.
 capture_qc.py          Photo quality gate (sharp/framed/glare-free/hi-res) for capture.
-submission.py          Capture -> queue -> human grade lifecycle.
-submit.py              CLI: create a submission from captured images.
+submission.py          Capture -> queue -> human grade -> printed lifecycle.
+submit.py              CLI: create a submission (intake/scan) from captured images.
+kiosk.py               CLI: finishing kiosk — status check + grade-print release.
 grader_portal.py       Internal Flask portal: human grader reviews + grades.
 grading.py             Map each factor to a sub-grade; combine into overall; CardGrade.
 calibration.py         Learn the grade mapping from graded cards (isotonic fit).

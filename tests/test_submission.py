@@ -6,13 +6,17 @@ import pytest
 
 from capture_qc import check_image
 from submission import (
+    CODE_QR,
     STATUS_GRADED,
     STATUS_PENDING,
+    STATUS_PRINTED,
     create_submission,
     grade_submission,
     list_submissions,
     load_submission,
+    mark_printed,
 )
+import kiosk
 from grader_portal import create_app as grader_app
 from web_report import create_app as report_app
 from conftest import make_card, make_scene
@@ -73,6 +77,68 @@ def test_grade_requires_overall(tmp_path):
     sub = create_submission(make_scene(), store_dir=str(tmp_path))
     with pytest.raises(ValueError):
         grade_submission(str(tmp_path), sub["id"], {"centering": 8})
+
+
+# --- kiosk: slab code QR, status, and grade-print release -------------------
+
+def test_slab_code_qr_written_at_intake(tmp_path):
+    sub = create_submission(make_scene(), store_dir=str(tmp_path),
+                            base_url="https://example.test")
+    assert (tmp_path / sub["id"] / CODE_QR).exists()        # slab tracking QR
+    assert sub["status_url"].endswith(f"/status/{sub['id']}")
+
+
+def test_print_release_lifecycle(tmp_path):
+    sub = create_submission(make_scene(), store_dir=str(tmp_path))
+    sid = sub["id"]
+
+    # Can't print before it's graded.
+    with pytest.raises(ValueError):
+        mark_printed(str(tmp_path), sid)
+
+    grade_submission(str(tmp_path), sid, {"overall": 9}, graded_by="alice")
+    printed = mark_printed(str(tmp_path), sid)
+    assert printed["status"] == STATUS_PRINTED
+    assert printed["printed_at"] is not None
+
+    # Idempotent-safe: can't re-print an already-printed slab.
+    with pytest.raises(ValueError):
+        mark_printed(str(tmp_path), sid)
+
+
+def test_kiosk_cli_status_and_print(tmp_path, capsys):
+    sub = create_submission(make_scene(), meta={"name": "Victini"}, store_dir=str(tmp_path))
+    sid = sub["id"]
+    assert kiosk.main(["status", sid, "--store", str(tmp_path)]) == 0
+    assert "PENDING_REVIEW" in capsys.readouterr().out
+
+    # Not graded -> print refused.
+    assert kiosk.main(["print", sid, "--store", str(tmp_path)]) == 1
+
+    grade_submission(str(tmp_path), sid, {"overall": 9, "corners": 9}, graded_by="alice")
+    assert kiosk.main(["print", sid, "--store", str(tmp_path)]) == 0
+    assert "LASER-MARK" in capsys.readouterr().out
+    assert load_submission(str(tmp_path), sid)["status"] == STATUS_PRINTED
+
+
+def test_status_website(tmp_path):
+    sub = create_submission(make_scene(), meta={"name": "Victini"}, store_dir=str(tmp_path),
+                            base_url="https://example.test")
+    sid = sub["id"]
+    client = report_app(str(tmp_path)).test_client()
+
+    # Pending: status works (the slab QR points here) but no grade shown.
+    pending = client.get(f"/status/{sid}")
+    assert pending.status_code == 200
+    assert "REVIEW" in pending.get_data(as_text=True)
+
+    grade_submission(str(tmp_path), sid, {"overall": 9}, graded_by="alice")
+    graded = client.get(f"/status/{sid}").get_data(as_text=True)
+    assert "GRADED" in graded and "/card/" in graded
+
+    mark_printed(str(tmp_path), sid)
+    assert "PRINTED" in client.get(f"/status/{sid}").get_data(as_text=True)
+    assert client.get("/status/FAN-NOPE000000").status_code == 404
 
 
 # --- graded submission is served by the public report app -------------------

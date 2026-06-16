@@ -22,6 +22,7 @@ import os
 from flask import Flask, abort, render_template_string, send_from_directory
 
 from report import list_reports, load_report, population
+from submission import STATUS_MESSAGE, load_submission
 
 # Friendly captions for the image gallery (covers AI- and human-submitted roles).
 GALLERY_CAPTIONS = {
@@ -202,6 +203,35 @@ INDEX = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 </div></body></html>"""
 
 
+STATUS_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ code }} — status</title>
+<style>
+  body{margin:0;background:#0f1115;color:#e8eaed;font:15px/1.5 system-ui,
+    Segoe UI,Roboto,Helvetica,Arial,sans-serif}.wrap{max-width:560px;margin:0 auto;padding:32px}
+  .pill{display:inline-block;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:700}
+  .review{background:#2d3748;color:#cbd5e0}.graded{background:#1a4731;color:#68d391}
+  .printed{background:#1e3a5f;color:#90cdf4}
+  .big{font-size:56px;font-weight:800;margin:14px 0 0}.big small{font-size:18px;color:#9aa0aa}
+  a.btn{display:inline-block;margin-top:16px;background:#4da3ff;color:#0b1020;
+    padding:10px 18px;border-radius:8px;font-weight:700;text-decoration:none}
+  .mut{color:#9aa0aa} .code{font-family:ui-monospace,monospace}
+</style></head><body><div class="wrap">
+  <div class="mut">Fansist Grading</div>
+  <h1>Slab <span class="code">{{ code }}</span></h1>
+  <span class="pill {{ st }}">{{ st.replace('_',' ').upper() }}</span>
+  <p>{{ message }}</p>
+  {% if report and report.overall_grade is not none %}
+    <div class="big">{{ '%g'|format(report.overall_grade) }}<small>/10</small></div>
+    {% if report.overall_score_1000 is not none %}
+    <div class="mut">{{ report.overall_score_1000 }} / 1000</div>{% endif %}
+    <a class="btn" href="/card/{{ code }}">View full report</a>
+  {% endif %}
+  {% if sub and sub.meta.get('name') %}<p class="mut">{{ sub.meta.get('name') }}
+    {{ sub.meta.get('set','') }}</p>{% endif %}
+</div></body></html>"""
+
+
 def create_app(store_dir: str) -> Flask:
     """Create the Flask app serving reports from ``store_dir``."""
     app = Flask(__name__)
@@ -233,6 +263,20 @@ def create_app(store_dir: str) -> Flask:
         if not os.path.isdir(cert_dir):
             abort(404)
         return send_from_directory(cert_dir, name)
+
+    @app.route("/status/<code>")
+    def status(code):
+        # Works from the moment a slab is created (before grading): the slab's QR
+        # points here. Reveals the grade once graded; full report at /card/<code>.
+        sub = load_submission(store, code)
+        report = load_report(store, code)
+        if sub is None and report is None:
+            abort(404)
+        st = sub.get("status") if sub else "graded"
+        return render_template_string(
+            STATUS_PAGE, code=code, sub=sub, report=report, st=st,
+            message=STATUS_MESSAGE.get(st, ""),
+        )
 
     @app.route("/health")
     def health():
